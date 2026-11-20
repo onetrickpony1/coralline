@@ -19,6 +19,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("JASP's R stopped: {0}")]
     R(String),
+    #[error("{0}")]
+    File(#[from] crate::jasp::Error),
     #[error("couldn't read what JASP's R wrote: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -39,7 +41,7 @@ fn runner() -> Option<Vec<String>> {
     if cfg!(target_os = "linux") {
         let ok = Command::new("flatpak").args(["info", "org.jaspstats.JASP"]).output().map(|o| o.status.success()).unwrap_or(false);
         if ok {
-            return Some(vec!["flatpak".into(), "run".into(), "--env=LC_ALL=C.UTF-8".into(), "--command=Rscript".into()]);
+            return Some(vec!["flatpak".into(), "run".into(), "--die-with-parent".into(), "--env=LC_ALL=C.UTF-8".into(), "--command=Rscript".into()]);
         }
     }
     None
@@ -48,10 +50,15 @@ fn runner() -> Option<Vec<String>> {
 /// Reruns the file's analyses and draws their plots. Returns figures.json with each picture as `src` (a data
 /// URI), plus `rerun`: the rerun's results, one entry per analysis.
 pub fn render(jasp: &Path) -> Result<serde_json::Value, Error> {
+    crate::jasp::read_path(jasp)?; // the same check as opening a file: a .jasp with results, else a clear message
     let start = runner().ok_or(Error::NoJasp)?;
     let work = work_dir();
+    clear_leftovers(&work);
     let scripts = work.join("r");
-    let out = work.join("out");
+    // one output folder per run, so runs at the same time (two windows, two files) don't clear each other's pictures
+    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let run = format!("{}-{}", std::process::id(), RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let out = work.join(format!("out-{run}"));
     std::fs::create_dir_all(&scripts)?;
     for (name, text) in SCRIPTS {
         let path = scripts.join(name);
@@ -59,23 +66,68 @@ pub fn render(jasp: &Path) -> Result<serde_json::Value, Error> {
             std::fs::write(&path, text)?;
         }
     }
-    if out.exists() {
-        std::fs::remove_dir_all(&out)?;
+    // a copy of the file inside the work folder, so JASP's sandbox only needs access to that one folder
+    let input = work.join(format!("input-{run}.jasp"));
+    let log = work.join(format!("log-{run}.txt"));
+    let result = run_r(&start, &work, &scripts, &input, &log, jasp, &out);
+    let figures = result.and_then(|()| collect(jasp, &out));
+    let _ = std::fs::remove_dir_all(&out);
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&log);
+    figures
+}
+
+/// Removes what runs that were stopped (the app closed, the computer slept) left behind: files of a run are named
+/// out-*, input-* and log-*, and anything of those older than a day can't belong to a run still going.
+fn clear_leftovers(work: &Path) {
+    let Ok(entries) = std::fs::read_dir(work) else { return };
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let ours = ["out-", "input-", "log-"].iter().any(|p| name.starts_with(p)) || name == "out" || name == "input.jasp";
+        let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+        if ours && (old || name == "out" || name == "input.jasp") {
+            let path = entry.path();
+            let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        }
     }
-    // A copy inside the work folder, so JASP's sandbox only needs access to that one folder
-    let input = work.join("input.jasp");
-    std::fs::copy(jasp, &input)?;
+}
+
+/// Longest a whole file may take. figures.R stops each analysis after 3 minutes, but R can't stop code that is
+/// busy inside a compiled library, so the app stops the whole run here instead of waiting for ever.
+const RUN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn run_r(start: &[String], work: &Path, scripts: &Path, input: &Path, log: &Path, jasp: &Path, out: &Path) -> Result<(), Error> {
+    std::fs::copy(jasp, input)?;
     let mut command = Command::new(&start[0]);
     command.args(&start[1..]);
     command.arg(format!("--filesystem={}", work.display()));
     command.arg("org.jaspstats.JASP");
-    command.arg(scripts.join("figures.R")).arg(&input).arg(&out).arg(&work);
-    let result = command.output()?;
-    if !result.status.success() {
-        let text = String::from_utf8_lossy(&result.stderr);
+    command.arg(scripts.join("figures.R")).arg(input).arg(out).arg(work);
+    // R's messages go to a file: a pipe nobody reads while we wait could fill up and stall R
+    command.stdout(std::process::Stdio::null()).stderr(std::fs::File::create(log)?);
+    let mut child = command.spawn()?;
+    let began = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if began.elapsed() > RUN_LIMIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::R(format!("it took longer than {} minutes, so jAPAsp stopped it", RUN_LIMIT.as_secs() / 60)));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    if !status.success() {
+        let text = std::fs::read_to_string(log).unwrap_or_default();
         let tail: Vec<&str> = text.lines().filter(|l| !l.contains("LC_")).rev().take(6).collect();
         return Err(Error::R(tail.into_iter().rev().collect::<Vec<_>>().join("\n")));
     }
+    Ok(())
+}
+
+fn collect(jasp: &Path, out: &Path) -> Result<serde_json::Value, Error> {
     let mut figures: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(out.join("figures.json"))?)?;
     if let Some(list) = figures.get_mut("figures").and_then(|f| f.as_array_mut()) {
         for figure in list {
@@ -110,7 +162,9 @@ fn add_trust(jasp: &Path, figures: &mut serde_json::Value) {
         let status = analyses.get(index.wrapping_sub(1)).and_then(|a| a.get("status")).and_then(|s| s.as_str()).unwrap_or("");
         let saved_analysis = saved.get("analyses").and_then(|a| a.get(index.wrapping_sub(1)));
         let plot = figure.get("name").and_then(|n| n.as_str()).unwrap_or("");
-        let verdict = if status != "complete" {
+        let verdict = if figure.get("src").is_none() {
+            Err(figure.get("error").and_then(|e| e.as_str()).unwrap_or("the plot wasn't redrawn").to_string())
+        } else if status != "complete" {
             Err(format!("the rerun ended with {}", if status.is_empty() { "no status" } else { status }))
         } else if let Some(why) = saved_analysis.and_then(|a| random_parts(a, plot)) {
             Err(why)
@@ -224,7 +278,8 @@ fn same_tables(saved: &serde_json::Value, rerun: &serde_json::Value) -> Result<(
 }
 
 /// JASP's own picture of each plot, from the file (`original`, a data URI, with `originalWidthIn`/`HeightIn` at
-/// the same scale as the redrawn ones): used when the rerun can't be trusted. Missing pictures are left out.
+/// the same scale as the redrawn ones): used when the rerun can't be trusted. A plot the file has but the rerun
+/// didn't draw (the analysis failed, or drew a different set) is added with only JASP's picture, so no plot is lost.
 fn add_originals(jasp: &Path, figures: &mut serde_json::Value) {
     let Ok(file) = std::fs::File::open(jasp) else { return };
     let Ok(mut archive) = zip::ZipArchive::new(file) else { return };
@@ -233,42 +288,87 @@ fn add_originals(jasp: &Path, figures: &mut serde_json::Value) {
         Err(_) => return,
     };
     let Some(list) = figures.get_mut("figures").and_then(|f| f.as_array_mut()) else { return };
-    for figure in list {
-        let index = figure.get("analysis").and_then(|a| a.as_u64()).unwrap_or(0) as usize;
-        let Some(name) = figure.get("name").and_then(|n| n.as_str()).map(String::from) else { continue };
-        let Some(results) = analyses.get("analyses").and_then(|a| a.get(index.wrapping_sub(1))).and_then(|a| a.get("results")) else { continue };
-        let Some(image) = find_image(results, &name) else { continue };
-        let Some(path) = image.get("data").and_then(|d| d.as_str()) else { continue };
-        let mut bytes = Vec::new();
-        if let Ok(mut entry) = archive.by_name(path) {
-            if std::io::Read::read_to_end(&mut entry, &mut bytes).is_err() {
+    let saved = analyses.get("analyses").and_then(|a| a.as_array()).map(Vec::as_slice).unwrap_or_default();
+    let of = |f: &serde_json::Value| f.get("analysis").and_then(|a| a.as_u64()).unwrap_or(0) as usize;
+    let mut all = Vec::new();
+    for (i, analysis) in saved.iter().enumerate() {
+        let mut found = Vec::new();
+        if let Some(results) = analysis.get("results") {
+            images(results, "", &mut found);
+        }
+        let mut used = vec![false; found.len()];
+        let mut drawn: Vec<serde_json::Value> = list.iter().filter(|f| of(f) == i + 1).cloned().collect();
+        for figure in drawn.iter_mut() {
+            let name = figure.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            // the same name, else the same name with its parts in another order (JASP versions sort pairs differently)
+            let hit = (0..found.len())
+                .find(|&k| !used[k] && found[k].0 == name)
+                .or_else(|| (0..found.len()).find(|&k| !used[k] && same_letters(&found[k].0, &name)));
+            if let Some(k) = hit {
+                used[k] = true;
+                attach(&mut archive, figure, found[k].1);
+            }
+        }
+        for (k, (key, image)) in found.iter().enumerate() {
+            if used[k] {
                 continue;
             }
-        } else {
-            continue;
-        }
-        figure["original"] = serde_json::Value::String(format!("data:image/png;base64,{}", base64(&bytes)));
-        // JASP's size in CSS pixels (72 per inch), on the same scale as figures.R: a 530 px plot becomes 5 in
-        let scale = 5.0 / (530.0 / 72.0);
-        for (key, out) in [("width", "originalWidthIn"), ("height", "originalHeightIn")] {
-            if let Some(px) = image.get(key).and_then(|v| v.as_f64()) {
-                figure[out] = serde_json::json!(px / 72.0 * scale);
+            let mut figure = serde_json::json!({
+                "analysis": i + 1, "name": key, "title": image.get("title").cloned().unwrap_or_default(),
+                "error": "the rerun didn't draw this plot", "facts": null,
+            });
+            attach(&mut archive, &mut figure, image);
+            if figure.get("original").is_some() {
+                drawn.push(figure);
             }
+        }
+        all.extend(drawn);
+    }
+    all.extend(list.iter().filter(|f| of(f) == 0 || of(f) > saved.len()).cloned());
+    *list = all;
+}
+
+/// The two names hold the same characters (pair names like "a-b" and "b-a")
+fn same_letters(a: &str, b: &str) -> bool {
+    let sorted = |s: &str| {
+        let mut c: Vec<char> = s.chars().collect();
+        c.sort_unstable();
+        c
+    };
+    a.len() == b.len() && sorted(a) == sorted(b)
+}
+
+fn attach<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>, figure: &mut serde_json::Value, image: &serde_json::Value) {
+    let Some(path) = image.get("data").and_then(|d| d.as_str()) else { return };
+    let Ok(mut entry) = archive.by_name(path) else { return };
+    let mut bytes = Vec::new();
+    if std::io::Read::read_to_end(&mut entry, &mut bytes).is_err() || bytes.is_empty() {
+        return;
+    }
+    figure["original"] = serde_json::Value::String(format!("data:image/png;base64,{}", base64(&bytes)));
+    // JASP's size in CSS pixels (72 per inch), on the same scale as figures.R: a 530 px plot becomes 5 in
+    let scale = 5.0 / (530.0 / 72.0);
+    for (key, out) in [("width", "originalWidthIn"), ("height", "originalHeightIn")] {
+        if let Some(px) = image.get(key).and_then(|v| v.as_f64()) {
+            figure[out] = serde_json::json!(px / 72.0 * scale);
         }
     }
 }
 
-/// The image object stored under this name anywhere in an analysis's results
-fn find_image<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+/// Every saved plot picture in an analysis's results: (its key, the image object), in the results' order
+fn images<'a>(value: &'a serde_json::Value, key: &str, out: &mut Vec<(String, &'a serde_json::Value)>) {
     match value {
         serde_json::Value::Object(map) => {
-            if let Some(found) = map.get(name).filter(|v| v.get("data").and_then(|d| d.as_str()).is_some_and(|d| d.ends_with(".png"))) {
-                return Some(found);
+            if map.get("data").and_then(|d| d.as_str()).is_some_and(|d| d.ends_with(".png")) {
+                out.push((key.to_string(), value));
+                return;
             }
-            map.values().find_map(|v| find_image(v, name))
+            for (k, v) in map {
+                images(v, k, out);
+            }
         }
-        serde_json::Value::Array(items) => items.iter().find_map(|v| find_image(v, name)),
-        _ => None,
+        serde_json::Value::Array(items) => items.iter().for_each(|v| images(v, key, out)),
+        _ => {}
     }
 }
 
@@ -304,6 +404,29 @@ mod tests {
         assert!(super::same_tables(&json!({}), &saved).is_err(), "nothing to check against");
         let cell = table(json!([{ "m": { "format": "dp:3", "value": 360.0 } }]));
         assert!(super::same_tables(&cell, &table(json!([{ "m": { "format": "dp:3", "value": 360 } }]))).is_ok(), "cells with a format, 360.0 = 360");
+    }
+
+    #[test]
+    fn only_old_run_files_are_cleared() {
+        let dir = std::env::temp_dir().join(format!("japasp-leftovers-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("out-1-0")).unwrap();
+        std::fs::create_dir_all(dir.join("out")).unwrap();
+        std::fs::create_dir_all(dir.join("rlib")).unwrap();
+        std::fs::write(dir.join("log-1-0.txt"), "").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+        std::fs::File::options().write(true).open(dir.join("log-1-0.txt")).unwrap().set_modified(old).unwrap();
+        super::clear_leftovers(&dir);
+        assert!(dir.join("out-1-0").exists(), "a run from today may still be going");
+        assert!(!dir.join("log-1-0.txt").exists(), "two days old");
+        assert!(!dir.join("out").exists(), "the old fixed folder");
+        assert!(dir.join("rlib").exists(), "not a run's file");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn pair_names_match_in_either_order() {
+        assert!(super::same_letters("pairs_Box Office-Freshness_scatterPlot", "pairs_Freshness-Box Office_scatterPlot"));
+        assert!(!super::same_letters("pairs_a-b_scatterPlot", "pairs_a-c_scatterPlot"));
     }
 
     #[test]

@@ -15,8 +15,17 @@ setDecoders <- function(map) {
 }
 runJasp <- function(o, ds) {
   name <- attr(o, "analysisName")
-  enc <- tryCatch(suppressWarnings(encodeOptionsAndDataset(o, ds)), error = function(e) NULL)
+  enc <- if (ncol(ds) == 0) NULL else tryCatch(suppressWarnings(encodeOptionsAndDataset(o, ds)), error = function(e) NULL)
   if (is.null(enc) || nrow(enc$encodingMap) == 0) { setDecoders(NULL); return(runAnalysis(name, ds, o, view = FALSE, quiet = TRUE)) }
+  # Number the encoded names by the variable's place in the data, as JASP does (JaspColumn_<n>_Encoded), not by
+  # where it first shows up in the options: analyses that sort variables (pairs like "a-b") then sort like JASP
+  map <- enc$encodingMap
+  pos <- match(map$original, colnames(ds)) - 1L
+  map$encoded <- ifelse(duplicated(map$original) | duplicated(map$original, fromLast = TRUE),
+    sprintf("JaspColumn_%d_Encoded_%s", pos, map$type), sprintf("JaspColumn_%d_Encoded", pos))
+  if (!anyNA(pos)) enc <- tryCatch(list(
+    options = jaspTools:::encodeOptionsWithMap(o, map, colnames(ds)),
+    dataset = jaspTools:::createEncodedDataset(ds, map), encodingMap = map), error = function(e) enc)
   attr(enc$options, "analysisName") <- name
   decode <- setDecoders(enc$encodingMap)
   res <- runAnalysis(name, enc$dataset, enc$options, view = FALSE, quiet = TRUE, encodedDataset = TRUE)

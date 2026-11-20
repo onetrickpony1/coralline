@@ -12,9 +12,12 @@ dir.create(outDir, showWarnings = FALSE, recursive = TRUE); dir.create(workDir, 
 # jaspTools writes its set-up into its own folder, which is read-only inside JASP: use a copy in the work folder
 libs <- list.dirs(modulesRoot, recursive = FALSE)
 rlib <- file.path(workDir, "rlib")
-if (!dir.exists(file.path(rlib, "jaspTools"))) {
-  src <- Filter(dir.exists, file.path(libs, "jaspTools"))[1]
-  if (is.na(src)) stop("jaspTools not found in JASP's modules")
+src <- Filter(dir.exists, file.path(libs, "jaspTools"))[1]
+if (is.na(src)) stop("jaspTools not found in JASP's modules")
+# copied again when JASP brings a different jaspTools (an update), so the copy never goes stale
+same <- function(a, b) isTRUE(tryCatch(identical(readLines(a, warn = FALSE), readLines(b, warn = FALSE)), error = function(e) FALSE))
+if (!same(file.path(src, "DESCRIPTION"), file.path(rlib, "jaspTools", "DESCRIPTION"))) {
+  unlink(rlib, recursive = TRUE)
   dest <- file.path(rlib, "jaspTools"); dir.create(dest, recursive = TRUE)
   # the module library holds a link to a folder with a hash name: copy its contents under the package's own name
   file.copy(list.files(normalizePath(src), full.names = TRUE, all.files = TRUE, no.. = TRUE), dest, recursive = TRUE)
@@ -26,10 +29,12 @@ suppressMessages({ setPkgOption("module.dirs", file.path(libs, basename(libs)));
 oldwd <- setwd(here); source("readjasp.R"); source("apastyle.R"); setwd(oldwd)
 source(file.path(here, "engine.R"))   # what JASP's engine provides: globals, name encoding, decoding, drawing
 
-pt <- 10; maxw <- 6.5; dpi <- 300; k <- 5 / (530 / 72)   # one scale: a 530 px JASP plot becomes 5 in, its text 10 pt
+pt <- 10; maxw <- 6.5; maxh <- 8; dpi <- 300; k <- 5 / (530 / 72)   # one scale: a 530 px JASP plot becomes 5 in, its text 10 pt
 jaspGraphs::graphOptions(fontsize = pt / k, family = apaFamily, axis.title.cex = 1.1, legend.cex = 1)
-opts <- analysisOptions(jaspFile); if (!is.null(attr(opts, "analysisName"))) opts <- list(opts)
-ds <- readJaspData(jaspFile)
+opts <- tryCatch(analysisOptions(jaspFile), error = function(e) list())   # a file without analyses
+if (!is.null(attr(opts, "analysisName"))) opts <- list(opts)
+# files of summary statistics have no data; their analyses get an empty data set
+ds <- tryCatch(readJaspData(jaspFile), error = function(e) data.frame())
 apaVariables <- colnames(ds)   # title case leaves the data's own names alone
 analyses <- list(); figures <- list(); rerun <- vector("list", length(opts))
 for (i in seq_along(opts)) {
@@ -37,14 +42,18 @@ for (i in seq_along(opts)) {
   setTimeLimit(elapsed = 180, transient = TRUE)
   res <- tryCatch(runJasp(o, ds), error = function(e) { err <<- conditionMessage(e); NULL })
   setTimeLimit(elapsed = Inf)
-  if (!is.null(res)) rerun[[i]] <- res$results
+  if (!is.null(res)) rerun[i] <- list(res$results)   # [i] <- list(): a NULL result must not shift the others
   decode <- get(".decodeColNamesLax", envir = globalenv())
   for (fig in res$state$figures) {
-    w <- fig$width / 72; h <- fig$height / 72
+    size <- function(v, fallback) if (is.numeric(v) && length(v) == 1 && is.finite(v) && v > 0) v else fallback
+    w <- size(fig$width, 480) / 72; h <- size(fig$height, 320) / 72   # JASP's default size when a plot has none
     if (w * k > maxw) { h <- h * maxw / (w * k); w <- maxw / k }   # too wide for the page: drawn smaller, same text size
-    png <- sprintf("a%d-%s.png", i, gsub("[^A-Za-z0-9_.-]", "_", fig$getUnique))
+    if (h * k > maxh) { w <- w * maxh / (h * k); h <- maxh / k }   # too tall for a page with its title and note
+    png <- sprintf("a%d-%d-%s.png", i, length(figures) + 1, substr(gsub("[^A-Za-z0-9_.-]", "_", fig$getUnique), 1, 80))
     q <- NULL
-    drawn <- if (inherits(fig$obj, "jaspGraphsPlot") && dataPanels(fig$obj) > 15) {
+    drawn <- if (is.null(fig$obj)) {
+      "JASP couldn't draw this plot either"
+    } else if (inherits(fig$obj, "jaspGraphsPlot") && dataPanels(fig$obj) > 15) {
       "too many panels to fit a page with readable text"   # big correlation matrices: JASP's own picture is better
     } else tryCatch({
       q <- apaPlot(fig$obj)
@@ -55,7 +64,7 @@ for (i in seq_along(opts)) {
     }, error = function(e) { while (dev.cur() > 1) dev.off(); conditionMessage(e) })
     # names decoded for the caller (titles, facts), but the picture's file name stays as written
     entry <- rapply(list(analysis = i, name = fig$getUnique, title = fig$title, error = if (isTRUE(drawn)) NULL else drawn,
-      widthIn = w * k, heightIn = h * k, facts = plotFacts(fig$obj), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
+      widthIn = w * k, heightIn = h * k, facts = tryCatch(plotFacts(fig$obj), error = function(e) NULL), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
       decode, classes = "character", how = "replace")
     entry$png <- if (isTRUE(drawn)) png else NULL
     figures[[length(figures) + 1]] <- entry

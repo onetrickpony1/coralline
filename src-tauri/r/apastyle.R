@@ -1,3 +1,4 @@
+apaScaleK <- 5 / (530 / 72)   # how much figures.R shrinks every plot (a 530 px JASP plot becomes 5 in)
 apaVariables <- character()   # the data's column names, set by figures.R: title case leaves them as they are
 # APA 7 touches on a finished JASP plot (ggplot or jaspGraphsPlot), applied after the rerun.
 apaFamily <- "Liberation Sans"
@@ -5,13 +6,26 @@ minorWords <- c("a","an","and","as","at","but","by","for","if","in","nor","of","
 apaTitleCase <- function(s) {
   if (!is.character(s) || length(s) != 1 || !nzchar(s)) return(s)
   w <- strsplit(s, " ", fixed = TRUE)[[1]]
+  # words that belong to one of the data's variable names (also names with spaces, "income level") stay as written
+  keep <- logical(length(w))
+  for (v in apaVariables[nzchar(apaVariables)]) {
+    vw <- strsplit(v, " ", fixed = TRUE)[[1]]; n <- length(vw)
+    if (n <= length(w)) for (k in seq_len(length(w) - n + 1))
+      if (identical(gsub("[^[:alnum:] $()%-]", "", w[k:(k + n - 1)]), vw) || identical(w[k:(k + n - 1)], vw)) keep[k:(k + n - 1)] <- TRUE
+  }
+  cap <- function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
   for (i in seq_along(w)) {
     x <- w[i]
+    if (keep[i]) next
     if (grepl("[A-Z].*[A-Z]|[0-9_]", x) || grepl("^[a-z]+[A-Z]", x)) next   # acronyms, codes, camelCase names stay
+    afterColon <- i > 1 && grepl(":$", w[i - 1])
+    if (tolower(x) == "a" && (i == 1 || afterColon)) { w[i] <- "A"; next }   # the article, not a symbol
     if (nchar(gsub("[^A-Za-z]", "", x)) <= 1) next                          # symbols: n and N, z, x mean different things
-    if (gsub("[^A-Za-z]", "", x) %in% apaVariables) next                    # the data's own variable names (hse, drp)
-    if (i > 1 && tolower(x) %in% minorWords) { w[i] <- tolower(x); next }
-    w[i] <- paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
+    if (i > 1 && !afterColon && tolower(x) %in% minorWords) { w[i] <- tolower(x); next }
+    # each part of a hyphenated word ("Self-Esteem"), minor words inside it too only when they are long (APA: 4+ letters)
+    parts <- strsplit(x, "-", fixed = TRUE)[[1]]
+    w[i] <- paste(vapply(seq_along(parts), function(k) if (k > 1 && tolower(parts[k]) %in% minorWords) parts[k] else cap(parts[k]), ""),
+      collapse = "-")
   }
   paste(w, collapse = " ")
 }
@@ -35,6 +49,14 @@ apaScales <- function(p) {
 }
 apaGgplot <- function(p, changes) {
   p <- apaText(apaScales(p))
+  p <- p + ggplot2::theme(text = ggplot2::element_text(family = apaFamily))   # also plots built on other themes (theme_bw)
+  # text drawn in the plot at 8 pt or more once printed (ggplot sizes text layers in mm; 1 mm = 2.845 pt)
+  minSize <- 8 / (2.845 * apaScaleK)
+  for (i in seq_along(p$layers)) if (grepl("Text|Label", class(p$layers[[i]]$geom)[1])) {
+    size <- p$layers[[i]]$aes_params$size
+    if (is.null(size) && is.null(p$layers[[i]]$mapping$size)) size <- p$layers[[i]]$geom$default_aes$size
+    if (is.numeric(size) && length(size) == 1 && size < minSize) p$layers[[i]]$aes_params$size <- minSize
+  }
   for (i in seq_along(p$layers)) {           # text drawn in the plot gets the same font as the axes
     if (inherits(p$layers[[i]]$geom, c("GeomText", "GeomLabel")) || grepl("Text", class(p$layers[[i]]$geom)[1])) {
       # set in place: the plot comes from our own rerun, and a ggproto child copy of a layer loops in ggplot2 4
@@ -54,11 +76,35 @@ apaGgplot <- function(p, changes) {
 }
 dataPanels <- function(p) sum(vapply(p$subplots, function(s) inherits(s, "ggplot") &&
   any(!grepl("Text|Label|Blank|RangeFrame", vapply(s$layers, function(l) class(l$geom)[1], ""))), logical(1)))
+# Plots of a correlation (rho) or a proportion (theta): every number in their text is bounded by 1, so it loses
+# its leading zero ("Median: .653", "95% CI: [.072, .243]"). Bayes factor labels keep theirs: BFs exceed 1.
+boundedText <- function(g, bounded) {
+  if (!bounded) return(g)
+  for (i in seq_along(g$layers)) {
+    l <- g$layers[[i]]
+    if (!grepl("Text|Label", class(l$geom)[1]) || !is.data.frame(l$data)) next
+    for (col in names(l$data)) if (is.character(l$data[[col]])) {
+      v <- l$data[[col]]; plain <- !grepl("BF", v)
+      v[plain] <- gsub("(^|[^0-9.])(-|\u2212)?0\\.([0-9])", "\\1\\2.\\3", v[plain])
+      l$data[[col]] <- v
+    }
+  }
+  g
+}
+isBoundedPlot <- function(p) {
+  subs <- if (inherits(p, "jaspGraphsPlot")) p$subplots else list(p)
+  titles <- unlist(lapply(subs, function(g) if (inherits(g, "ggplot")) {
+    sc <- tryCatch(g$scales$get_scales("x")$name, error = function(e) NULL)
+    c(if (is.character(sc)) sc, if (is.character(g$labels$x)) g$labels$x, if (!is.null(g$labels$x) && !is.character(g$labels$x)) deparse(g$labels$x))
+  }))
+  any(grepl("rho|\u03c1|correlation|proportion|theta|\u03b8", titles, ignore.case = TRUE))
+}
 apaPlot <- function(p) {
   changes <- local({ v <- character(); list(add = function(x) v <<- c(v, x), get = function() v) })
-  if (inherits(p, "ggplot")) p <- apaGgplot(p, changes)
+  bounded <- isBoundedPlot(p)
+  if (inherits(p, "ggplot")) p <- boundedText(apaGgplot(p, changes), bounded)
   else if (inherits(p, "jaspGraphsPlot")) for (i in seq_along(p$subplots)) if (inherits(p$subplots[[i]], "ggplot")) {
-    q <- apaGgplot(p$subplots[[i]], changes)
+    q <- boundedText(apaGgplot(p$subplots[[i]], changes), bounded)
     p$subplots[[i]] <- if (dataPanels(p) >= 4) thinBreaks(q) else q   # matrix layouts: little room per panel
   }
   attr(p, "apaChanges") <- changes$get()
@@ -109,8 +155,9 @@ thinBreaks <- function(p) {
     if (!identical(tr, "identity") || !(inherits(sc$labels, "waiver") || is.function(sc$labels) || is.character(sc$labels) || is.numeric(sc$labels))) next
     # keep JASP's own ticks: both ends (the axis line runs between them) and evenly spaced ones in between
     b <- sc$breaks; n <- length(b)
-    step <- c(3, 2, 4)[((n - 1) %% c(3, 2, 4)) == 0][1]
-    keep <- if (is.na(step)) c(1, n) else seq(1, n, by = step)
+    # the smallest even step that lands on the last tick and leaves 5 ticks or fewer (11 ticks: every 5th)
+    steps <- Filter(function(st) (n - 1) %% st == 0 && (n - 1) / st + 1 <= 5, seq_len(n - 1))
+    keep <- seq(1, n, by = steps[1])
     lab <- sc$labels
     sc$breaks <- b[keep]
     if ((is.character(lab) || is.numeric(lab)) && length(lab) == n) sc$labels <- trueMinus(lab[keep])
