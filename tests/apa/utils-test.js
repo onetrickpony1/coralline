@@ -882,6 +882,20 @@ function test_apaMixedDf() {
 	t(lines[4].split("\t")[3], "37.86", "apa: Welch's df keeps its decimals");
 }
 
+function test_apaGroupsAndNotes() {
+	_reset();
+	var t = _assertEq;
+	var apa = buildAPATable(apaRenderTable(new JASPWidgets.table({ title: "Group Descriptives", schema: { fields: [
+		{ name: "v", title: "", type: "string" }, { name: "g", title: "Group", type: "string" }, { name: "n", title: "N", type: "integer" },
+		{ name: "m", title: "Mean", type: "number", format: "sf:4;dp:3" } ] },
+		data: [ { v: "drp", g: "Control", n: 23, m: 41.52 }, { v: "", g: "Treat", n: 21, m: 51.48 } ],
+		footnotes: [ { symbol: "<em>Note.</em>", text: "For all tests, group <em> Control </em> is less than group <em> Treat </em>." } ] })),
+		{ title: "Group Descriptives", footnotes: [ { symbol: "<em>Note.</em>", text: "For all tests, group <em> Control </em> is less than group <em> Treat </em>." } ] }, 1);
+	var lines = apa.text.split("\n");
+	t(lines[2].split("\t")[2], "n", "apa: group sizes are n");
+	t(/group Treat\.$/.test(lines.filter(function (l) { return /^Note\./.test(l); })[0]), true, "apa: no space before the full stop after an italic word");
+}
+
 function test_apaChangeLog() {
 	_reset();
 	var t = _assertEq;
@@ -944,6 +958,7 @@ function runAllUtilTests() {
 	test_buildAPATable();
 	test_apaChangeLog();
 	test_apaMixedDf();
+	test_apaGroupsAndNotes();
 
 	return {
 		passed: utilsTestPassed,

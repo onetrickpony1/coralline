@@ -26,11 +26,33 @@
 - **Clearer wording.** "What changed" starts with "Your results are the same as in JASP"; copy messages say "Paste it, then finish the yellow part"; the README starts with what the app does for you and puts the double-click installer first.
 - **Works in a narrow window.** Below 760 px the table list opens as a drawer (button or <kbd>B</kbd>), and the reload button stays visible.
 - **Each file keeps its own first table number.** Search finds a table by its number ("table 1" no longer matches tables 10 and 11), and a clear button empties the search.
+- **Know when you're finished.** After copying, the list and ring stay amber while yellow parts are left in your document, and the line under the ring names them ("Still to do in your document: 3 yellow parts (Tables 1, 2)"). A copied table with yellow parts keeps a small yellow dot beside its tick.
+- **Copy again when a number changes.** Leaving a table out, changing the first number or new values from JASP marks the copied tables affected ("You copied this as Table 3. It's now Table 2"), in the list, on the card and in the message.
+- **Copies are remembered** for each file, so the ticks are still there the next day.
+- **Fewer yellow dots.** Nearly every table asks for a better title, so a table with only that to do gets a yellow ring; the filled, pulsing dot is kept for extra work (headings, names, a landscape page).
+- **Same numbers, two tables.** When two descriptives tables repeat the same means and *SD*s (the t test's Group Descriptives and the Descriptives analysis), the second says so and offers to leave it out.
+- **Plainer guidance.** Student and Welch rows, and VS-MPR, come with the exact JASP tick box and "your other numbers don't change"; left-out assumption checks say they're usually reported in a sentence; the start screen and Leave out say your JASP file is never changed.
+- **The to-dos sit above the table**, so their help is on screen next to a tall table, and clicking one only scrolls if the spot is out of sight.
+- **What changed** lists one line per rule, opened with a click, has a **Hide changes** button at the end, and says when a value was only highlighted for you to explain.
+- **Tidier cards and title bar.** **Copy APA table** is the one main button; Copy as plain text and Leave out are in a small menu on each card. The theme choice moved into the menu, with names. With a file open, the menu also has Open recent and Close file. In a narrow window the title bar stays on one row and keeps the file name.
+- **Progress in the title bar** when the table list is hidden; click it to bring the list back.
+- **The dark theme's main buttons are a muted blue**, so they read as the main action on graphite.
+- **The list shortens titles that start the same** ("… Charisma" under Post Hoc Comparisons) and wraps to two lines; group counts are the tables in your report.
+- **Search finds variables and labels** inside tables ("adverts", "Welch").
+- **Single-key shortcuts can be turned off** in the menu, for screen readers. Tab leaves the menu closed behind it, and <kbd>W</kbd> moves the focus into What changed.
+- **The reload button shows whether the file is watched**: a green dot when JASP's saves reload the tables, an empty one when not.
+- In the To copy view, a copied table leaves the list after a moment. Messages appear in the bottom right, away from what you're reading.
+- **A Mac installer download** (`jAPAsp-install-mac.zip`) next to the Windows one.
 
 ### Fixes
+- **Levene's test in ANOVA** ("Test for Equality of Variances") and the quality-control normality summary now start out of the report like other assumption checks.
+- **Group sizes are *n*** in descriptives by group, as APA asks; *N* stays for the whole sample.
+- **No space before a full stop after an italic word** in notes ("group *Treat*." instead of "group *Treat* .").
+- **Settings for the files you use most are kept**: the 50 remembered are now the 50 most recently used, not the first 50 opened.
+- <kbd>Esc</kbd> in the keyboard shortcuts window no longer clears the search; Number the first table can't be changed with no file open; the table list header no longer jumps while it folds away.
 - **The copy buttons are always on screen.** A wide table made the page wider than the window and pushed **Copy APA table** off the right edge, even on a 1366 px laptop screen. Long notes now wrap at the page width in the preview, as they do when pasted.
 - **A failed reload no longer says the tables were updated.** If the file couldn't be read (JASP still writing it), the app said "Tables updated" and kept the old numbers. It now says the tables are from before, and tries again at the next check.
-- **Copied ticks stay after a reload or renumbering**, and belong to the right tables.
+- **Copied ticks survive a reload** and belong to the right tables.
 - **Student's whole *df* shows without decimals** ("42") next to Welch's ("37.86"), instead of "42.00".
 - **Tables JASP couldn't compute, or left empty, are shown as such** instead of disappearing and shifting the numbers.
 - **Analyses with the same name are numbered** ("Linear Regression (2)"); the list shows the tidied table titles, with the full title on hover.

@@ -34,11 +34,12 @@
 		filter: "all",
 		query: "",
 		current: null,       // id of the table the keyboard acts on
-		copied: new Set(),   // keys of the tables copied since this file was opened (kept across reloads)
+		copied: new Map(),   // key -> { n: table number, h: content hash } of the tables copied from this file (saved per file)
 		files: settings.read("files", {}),   // per file: { start, out: [keys left out], in: [checks put back in] }
 		theme: settings.read("theme", "system"),
 		zoom: settings.read("zoom", 1),
 		highlights: settings.read("highlights", true),
+		singleKeys: settings.read("singleKeys", true),   // J, K, C, T, W, B, H without Ctrl (off for screen readers)
 		sidebar: settings.read("sidebar", true),     // the table list on the left is shown
 		autoReload: settings.read("autoReload", true),
 		reduced: root.classList.contains("reduced"),
@@ -59,22 +60,51 @@
 
 	// Tables that check a test's assumptions or diagnose a model. Most papers leave them out, so they start out of the
 	// numbering; one click puts them back.
-	const checkTitles = /^(Test of Normality|Assumption Checks|Tests? of Equality of Variances|Levene|Shapiro|Test of Sphericity|Homogeneity|Collinearity Diagnostics|Casewise Diagnostics|Influential Cases|Residuals Statistics|Q-Q|Multicollinearity)/i;
+	const checkTitles = /^(Test of Normality|Assumption Checks|Tests? (of|for) Equality of Variances|Levene|Summary of test against the normal distribution|Shapiro|Test of Sphericity|Homogeneity|Collinearity Diagnostics|Casewise Diagnostics|Influential Cases|Residuals Statistics|Q-Q|Multicollinearity)/i;
 
 	// What the reader settings for the open file are (table numbering, left-out tables)
 	function fileKey() { return state.path || state.name || ""; }
 	function fileSettings() {
 		const saved = state.files[fileKey()] || {};
-		return { start: saved.start || 1, out: saved.out || [], in: saved.in || [] };
+		return { start: saved.start || 1, out: saved.out || [], in: saved.in || [], copied: saved.copied || {} };
 	}
 	function saveFileSettings(change) {
+		const key = fileKey();
+		if (!key)
+			return;
 		const next = Object.assign(fileSettings(), change);
-		state.files[fileKey()] = next;
-		// Keep the 50 most recent files
+		// Re-inserted at the end, so the 50 kept are the 50 most recently used files
+		delete state.files[key];
+		state.files[key] = next;
 		const keys = Object.keys(state.files);
-		if (keys.length > 50)
-			delete state.files[keys[0]];
+		while (keys.length > 50)
+			delete state.files[keys.shift()];
 		settings.write("files", state.files);
+	}
+
+	// A short fingerprint of a table's copy, without its number: tells whether JASP's values changed since a copy
+	function contentHash(item) {
+		const text = item.apa.text.split("\n").slice(1).join("\n");
+		let h = 0;
+		for (let i = 0; i < text.length; i++)
+			h = (h * 31 + text.charCodeAt(i)) | 0;
+		return (h >>> 0).toString(36);
+	}
+
+	// What became of a copied table: null (not copied), "ok", "renumbered" or "changed"
+	function copyState(item) {
+		const copy = state.copied.get(item.key);
+		if (!copy || !item.apa || item.left)
+			return null;
+		if (copy.h !== contentHash(item))
+			return "changed";
+		return copy.n !== item.number ? "renumbered" : "ok";
+	}
+
+	function saveCopied() {
+		const copied = {};
+		state.copied.forEach(function (v, k) { copied[k] = v; });
+		saveFileSettings({ copied: copied });
 	}
 
 	// The APA title without its placeholder: what the sidebar and card header show
@@ -226,8 +256,12 @@
 	function show(file, name) {
 		state.file = file;
 		state.name = name || "";
-		state.copied.clear();
+		state.copied = new Map(Object.entries(fileSettings().copied));
 		$id("startNumber").value = String(fileSettings().start);
+		$id("startNumber").disabled = false;
+		$id("openButton").classList.remove("primary");  // with a file open, copying is the main action
+		$id("closeFile").hidden = false;
+		$id("fileRule").hidden = false;
 		const groups = render();
 		$id("empty").hidden = true;
 		$id("layout").hidden = false;
@@ -260,21 +294,29 @@
 		const all = build(state.file);
 		const groups = all.filter(function (g) { return !g.plotsOnly; });
 		state.groups = groups;
+		markDuplicates(groups);
 		shownCurrent = null;
 		const side = $id("side");
 		side.textContent = "";
 		tables.textContent = "";
 
 		for (const group of groups) {
-			const list = el("details", { open: "" }, [el("summary", { title: group.title }, [el("span", { class: "g", text: group.title }), el("span", { class: "count", text: String(group.items.length) })])]);
+			// The count is the tables in the report; the tooltip gives all of them
+			const inReport = group.items.filter(function (i) { return i.apa && !i.left; }).length;
+			const list = el("details", { open: "" }, [el("summary", { title: group.title + ": " + plural(group.items.length, "table", "tables") + ", " + inReport + " in your report" }, [
+				el("span", { class: "g", text: group.title }), el("span", { class: "count", text: String(inReport) })])]);
 			side.appendChild(list);
-			tables.appendChild(el("h2", { class: "analysis-title", text: group.title }));
+			// One table named like its analysis: the card says it all, so no heading above it
+			const sameName = group.items.length === 1 && group.title.toLowerCase().replace(/\W/g, "") === group.items[0].title.toLowerCase().replace(/\W/g, "");
+			if (!sameName)
+				tables.appendChild(el("h2", { class: "analysis-title", text: group.title }));
+			const shortTitles = shortenTitles(group.items);
 			for (const item of group.items) {
 				const id = "table-" + item.key;
 				item.id = id;
 				const link = el("a", { href: "#" + id, "data-id": id, title: item.title }, [
 					el("span", { class: "n", text: item.number ? String(item.number) : "–" }),
-					el("span", { class: "t", text: item.title }),
+					el("span", { class: "t", text: shortTitles.get(item) }),
 					el("span", { class: "mark" })
 				]);
 				link.addEventListener("click", function (e) {
@@ -316,6 +358,20 @@
 		return groups;
 	}
 
+	// In the list, titles that share a start ("Post Hoc Comparisons - Charisma", "... - Looks") show only what tells
+	// them apart ("… Charisma"); the full title is in the tooltip
+	function shortenTitles(items) {
+		const out = new Map();
+		const prefixOf = function (t) { const m = /^(.+? - )\S/.exec(t); return m ? m[1] : null; };
+		const counts = {};
+		items.forEach(function (i) { const p = prefixOf(i.title); if (p) counts[p] = (counts[p] || 0) + 1; });
+		items.forEach(function (i) {
+			const p = prefixOf(i.title);
+			out.set(i, p && counts[p] > 1 ? "\u2026 " + i.title.slice(p.length) : i.title);
+		});
+		return out;
+	}
+
 	// Tables that go in the report: converted and not left out
 	function countable() {
 		const out = [];
@@ -326,35 +382,80 @@
 		return out;
 	}
 
-	// The ring counts copies: the yellow parts can only be finished in the document, so "copied" is what the app can know
+	// To-dos beyond the title. Almost every table asks for a better title, so the dot only marks extra work.
+	function extraTodos(item) { return item.apa ? item.apa.todo.filter(function (t) { return todoKind(t) !== "title"; }) : []; }
+
+	// The ring counts copies (the yellow parts can only be finished in the document, so "copied" is what the app can
+	// know). It turns amber while copied tables still have yellow parts, and the line under it says what's left.
 	function updateProgress() {
 		const items = countable();
-		const copied = items.filter(function (i) { return state.copied.has(i.key); }).length;
-		$id("readyCount").textContent = copied + " of " + items.length;
+		const copied = items.filter(function (i) { return copyState(i) === "ok"; });
+		const stale = items.filter(function (i) { const c = copyState(i); return c === "renumbered" || c === "changed"; });
+		$id("readyCount").textContent = copied.length + " of " + items.length;
 		$id("readyLabel").textContent = items.length === 1 ? "table copied" : "tables copied";
-		$id("readyHint").hidden = !items.some(function (i) { return i.apa.todo.length > 0; });
+		const yellow = copied.reduce(function (n, i) { return n + i.apa.todo.length; }, 0);
+		const hint = $id("readyHint");
+		if (stale.length > 0) {
+			const them = stale.length === 1 ? "it" : "them";
+			const changed = stale.some(function (i) { return copyState(i) === "changed"; });
+			hint.textContent = plural(stale.length, "copied table has", "copied tables have") + (changed ? " changed" : " a new number") + " since you copied " + them + ": copy " + them + " again (" + (stale.length === 1 ? "Table " : "Tables ") + stale.map(function (i) { return i.number; }).join(", ") + ").";
+		}
+		else if (copied.length === 0)
+			hint.textContent = items.some(function (i) { return i.apa.todo.length > 0; }) ? "After pasting, replace the yellow parts in your document." : "";
+		else if (yellow > 0) {
+			const tables = copied.filter(function (i) { return i.apa.todo.length > 0; }).map(function (i) { return i.number; });
+			hint.textContent = "Still to do in your document: " + yellowParts(yellow) + " (" + (tables.length === 1 ? "Table " : "Tables ") + tables.join(", ") + ").";
+		}
+		else
+			hint.textContent = "";
+		hint.hidden = hint.textContent === "";
+		hint.classList.toggle("warn", stale.length > 0);
+		$id("progress").classList.toggle("unfinished", yellow > 0 || stale.length > 0);
 		const circumference = 113.1;
-		$id("ringDone").style.strokeDashoffset = String(items.length === 0 ? circumference : circumference * (1 - copied / items.length));
+		$id("ringDone").style.strokeDashoffset = String(items.length === 0 ? circumference : circumference * (1 - copied.length / items.length));
+		updateBarProgress(copied.length, items.length);
 	}
 
-	// The mark after a table's name: a tick once copied, otherwise a dot (yellow: parts to finish, green: nothing to add)
+	// The same count in the title bar, for when the table list is hidden or folded into a drawer
+	function updateBarProgress(copied, total) {
+		$id("barCount").textContent = copied + " of " + total;
+		$id("barRingDone").style.strokeDashoffset = String(total === 0 ? 113.1 : 113.1 * (1 - copied / total));
+		$id("barProgress").classList.toggle("unfinished", $id("progress").classList.contains("unfinished"));
+		showBarProgress();
+	}
+	function showBarProgress() {
+		$id("barProgress").hidden = !state.file || countable().length === 0 || (state.sidebar && !isNarrow());
+	}
+
+	// The mark after a table's name. Copied: a tick (with a small yellow dot while it has extra yellow parts).
+	// Not copied: yellow dot for extra work (headings, names, page), a quiet dot when only the title is left,
+	// green when there is nothing to add. Renumbered or changed since copying: a "copy again" mark.
 	function updateMark(item) {
 		const mark = item.link.querySelector(".mark");
 		mark.textContent = "";
 		const todo = item.apa ? item.apa.todo.length : 0;
+		const extra = extraTodos(item).length;
+		const copy = copyState(item);
 		let kind, label;
 		if (item.failed || item.error) { kind = "error"; label = item.failed || "Couldn't convert"; }
 		else if (item.left) { kind = "left"; label = "Left out of your report"; }
-		else if (state.copied.has(item.key)) { kind = "copied"; label = todo > 0 ? "Copied. Finish the " + yellowParts(todo) + " in your document" : "Copied"; }
-		else if (todo > 0) { kind = "todo"; label = plural(todo, "yellow part", "yellow parts") + " to finish after pasting"; }
+		else if (copy === "renumbered") { kind = "stale"; label = "Now Table " + item.number + ": copy it again (you copied it as Table " + state.copied.get(item.key).n + ")"; }
+		else if (copy === "changed") { kind = "stale"; label = "JASP's values changed since you copied it: copy it again"; }
+		else if (copy === "ok") { kind = "copied" + (extra > 0 ? " more" : ""); label = todo > 0 ? "Copied. Finish the " + yellowParts(todo) + " in your document" : "Copied"; }
+		else if (extra > 0) { kind = "todo"; label = plural(todo, "yellow part", "yellow parts") + " to finish after pasting"; }
+		else if (todo > 0) { kind = "title"; label = "Add a title after pasting"; }
 		else { kind = "ready"; label = "Nothing to add: ready to paste"; }
 		mark.className = "mark " + kind;
 		mark.title = label;
-		if (kind === "copied")
+		if (copy === "ok")
 			mark.appendChild(tick());
+		if (kind === "stale")
+			mark.appendChild(svgIcon(["M15 8.5A5.5 5.5 0 1 0 14 13", "M15 4.5v4h-4"]));
 		mark.appendChild(el("span", { class: "sr", text: label }));
 		item.link.classList.toggle("left", kind === "left" || kind === "error");
 	}
+
+	function staleCount() { return countable().filter(function (i) { const c = copyState(i); return c === "renumbered" || c === "changed"; }).length; }
 
 	function yellowParts(n) { return n === 1 ? "yellow part" : n + " yellow parts"; }
 
@@ -371,7 +472,9 @@
 		state.current = item.id;
 		render();
 		const now = itemById(item.id);
-		toast(left ? "Left out of your report. The tables after it are renumbered." : "Back in your report as Table " + (now ? now.number : "") + ".");
+		const stale = staleCount();
+		toast((left ? "Left out of your report. The tables after it are renumbered." : "Back in your report as Table " + (now ? now.number : "") + ".")
+			+ (stale > 0 ? " " + plural(stale, "copied table has", "copied tables have") + " a new number: copy " + (stale === 1 ? "it" : "them") + " again." : ""));
 	}
 
 	function card(item, id) {
@@ -384,35 +487,46 @@
 			node.appendChild(el("div", { class: "error", text: item.failed || "This table couldn't be converted: " + item.error }));
 			return node;
 		}
-
-		const leaveButton = el("button", { type: "button", class: "btn quiet", title: item.left ? "Give it a table number and include it in Copy all" : "No table number and not in Copy all; the tables after it are renumbered", text: item.left ? "Put in report" : "Leave out" });
-		leaveButton.addEventListener("click", function () { setLeftOut(item, !item.left); });
 		node.addEventListener("pointerdown", function () { setCurrent(id); });
+		const safe = "Only changes this list: your JASP file stays the same.";
 
 		if (item.left) {
-			head.appendChild(el("div", { class: "actions" }, [leaveButton]));
+			const back = el("button", { type: "button", class: "btn", title: "Give it a table number and include it in Copy all. " + safe, text: "Put in report" });
+			back.addEventListener("click", function () { setLeftOut(item, false); });
+			head.appendChild(el("div", { class: "actions" }, [back]));
 			node.appendChild(el("p", { class: "left-note", text: item.check
-				? "A check of the test's assumptions. Most reports leave it out, so it has no table number. Ask your tutor if you're unsure."
+				? "This table checks the test's assumptions. Reports usually describe that in a sentence, not a table (for example, “Levene's test was not significant”). Put it in your report only if your marking guide asks for it."
 				: "Left out of your report: it has no table number and isn't in Copy all." }));
 			return node;
 		}
 
-		const changesButton = el("button", { type: "button", class: "btn", title: "Show what was changed to match APA 7 (W)", "aria-expanded": "false", "aria-controls": id + "-changes", text: "What changed" });
-		const textButton = el("button", { type: "button", class: "btn", title: "Copy as plain text, with tabs between columns (T)", text: "Copy text" });
+		const changesButton = el("button", { type: "button", class: "btn quiet", title: "What was changed to match APA 7 (W)", "aria-expanded": "false", "aria-controls": id + "-changes", text: "What changed" });
 		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs (C)" }, [el("span", { class: "swap", text: "Copy APA table" })]);
-		head.appendChild(el("div", { class: "actions" }, [leaveButton, changesButton, textButton, button]));
+		// The less used actions sit in a small menu on the card
+		const moreButton = el("button", { type: "button", class: "icon-btn card-more", "aria-haspopup": "true", "aria-expanded": "false", "aria-label": "More for " + numberText, title: "More" }, [svgIcon(["M4.5 10h.01", "M10 10h.01", "M15.5 10h.01"])]);
+		const textItem = el("button", { type: "button", title: "For spreadsheets and plain text editors, or if pasting the table doesn't work (T)" }, [el("span", { text: "Copy as plain text" }), el("small", { text: "Only if pasting the table doesn't work" })]);
+		const leaveItem = el("button", { type: "button", title: safe }, [el("span", { text: "Leave out of report" }), el("small", { text: "No table number, not in Copy all" })]);
+		const cardMenu = el("div", { class: "card-menu glass", role: "group", "aria-label": "More for " + numberText }, [textItem, leaveItem]);
+		cardMenu.hidden = true;
+		const toggleCardMenu = function (open) {
+			cardMenu.hidden = !open;
+			moreButton.setAttribute("aria-expanded", String(open));
+			if (open)
+				textItem.focus();
+		};
+		moreButton.addEventListener("click", function () { toggleCardMenu(cardMenu.hidden); });
+		cardMenu.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.stopPropagation(); toggleCardMenu(false); moreButton.focus(); } });
+		cardMenu.addEventListener("focusout", function (e) { if (!cardMenu.contains(e.relatedTarget) && e.relatedTarget !== moreButton) toggleCardMenu(false); });
+		document.addEventListener("pointerdown", function (e) { if (!cardMenu.hidden && !cardMenu.contains(e.target) && e.target.closest(".card-more") !== moreButton) toggleCardMenu(false); });
+		textItem.addEventListener("click", function () { toggleCardMenu(false); copyItem(item, true); });
+		leaveItem.addEventListener("click", function () { toggleCardMenu(false); setLeftOut(item, true); });
+		head.appendChild(el("div", { class: "actions" }, [changesButton, el("div", { class: "card-more-wrap" }, [moreButton, cardMenu]), button]));
 
-		const paper = el("div", { class: "paper" });
-		paper.innerHTML = item.apa.html;
-		node.appendChild(el("div", { class: "tray" }, [paper]));
+		// Copied, then renumbered or changed by JASP: say so above the table
+		item.staleNote = el("p", { class: "stale-note", role: "status" });
+		node.appendChild(item.staleNote);
 
-		const changes = el("section", { class: "changes", id: id + "-changes", "aria-label": "What changed in " + numberText });
-		changes.hidden = true;
-		node.appendChild(changes);
-		changesButton.addEventListener("click", function () { toggleChanges(item); });
-		item.changesButton = changesButton;
-		item.changesPanel = changes;
-
+		// To-dos first, so their help is on screen next to the table, not below a tall one
 		const todo = item.apa.todo;
 		if (todo.length > 0) {
 			const chips = el("div", { class: "todo" }, [el("span", { class: "lead", text: "Finish after pasting:" })]);
@@ -431,7 +545,7 @@
 						hint.textContent = "";
 						for (const part of todoHelp(kind, thing, item))
 							hint.appendChild(part);
-						showHighlight(item, kind);
+						flashHighlight(item, kind);
 					}
 				});
 				chips.appendChild(chip);
@@ -445,12 +559,62 @@
 		const notes = tableNotes(item);
 		if (notes.length > 0)
 			node.appendChild(el("ul", { class: "info" }, notes.map(function (n) { return el("li", { text: n }); })));
+		if (item.duplicateOf) {
+			const leave = el("button", { type: "button", class: "link", title: safe, text: "Leave this one out" });
+			leave.addEventListener("click", function () { setLeftOut(item, true); });
+			node.appendChild(el("p", { class: "dup-note" }, ["Same numbers as Table " + item.duplicateOf.number + " (" + item.duplicateOf.title + "). Most reports use only one of these. ", leave]));
+		}
+
+		const paper = el("div", { class: "paper" });
+		paper.innerHTML = item.apa.html;
+		node.appendChild(el("div", { class: "tray" }, [paper]));
+
+		const changes = el("section", { class: "changes", id: id + "-changes", "aria-label": "What changed in " + numberText });
+		changes.hidden = true;
+		node.appendChild(changes);
+		changesButton.addEventListener("click", function () { toggleChanges(item); });
+		item.changesButton = changesButton;
+		item.changesPanel = changes;
 
 		button.addEventListener("click", function () { copyItem(item, false); });
-		textButton.addEventListener("click", function () { copyItem(item, true); });
 		item.button = button;
+		updateCardState(item);
 		return node;
 	}
+
+	function updateCardState(item) {
+		if (!item.staleNote)
+			return;
+		const copy = copyState(item);
+		const before = state.copied.get(item.key);
+		item.staleNote.textContent = copy === "renumbered" ? "You copied this as Table " + before.n + ". It's now Table " + item.number + ": copy it again."
+			: copy === "changed" ? "JASP's values changed since you copied this table: copy it again." : "";
+		item.staleNote.hidden = item.staleNote.textContent === "";
+	}
+
+	// Descriptives tables that repeat each other's numbers (the t test's Group Descriptives and the Descriptives
+	// analysis's Descriptive Statistics, for example): the later one gets a note offering to leave it out
+	function markDuplicates(groups) {
+		const numbers = function (item) {
+			const lines = item.apa.text.split("\n").slice(2).filter(function (l) { return !/^Note\./.test(l); });
+			return new Set((lines.join("\t").match(/-?\d[\d,]*\.\d+/g) || []));
+		};
+		const desc = [];
+		for (const group of groups)
+			for (const item of group.items)
+				if (item.apa && !item.left && /descriptiv/i.test(item.rawTitle))
+					desc.push(item);
+		for (let b = 1; b < desc.length; b++)
+			for (let a = 0; a < b; a++) {
+				const x = numbers(desc[a]), y = numbers(desc[b]);
+				const shared = Array.from(y).filter(function (n) { return x.has(n); }).length;
+				if (shared >= 4 && shared >= 0.4 * Math.min(x.size, y.size)) {  // the same means and SDs, say
+					desc[b].duplicateOf = desc[a];
+					break;
+				}
+			}
+	}
+
 
 	// What each to-do is about, from the builder's wording
 	function todoKind(text) {
@@ -517,34 +681,35 @@
 		const size = /<table style="[^"]*font-size: (\d+)pt/.exec(item.apa.html);
 		if (size && +size[1] < 12)
 			notes.push("Smaller type (" + size[1] + " pt) so the table fits the width of the page. APA allows smaller type in tables.");
-		const extras = [];
-		if (/VS-MPR/.test(item.apa.text))
-			extras.push("VS-MPR");
+		// Extras: name the JASP tick box, and say the other numbers stay the same
+		const safe = " Your other numbers don't change, and this table updates by itself when you save in JASP.";
 		if (/(^|\t)Student(\t|$)/m.test(item.apa.text) && /(^|\t)Welch(\t|$)/m.test(item.apa.text))
-			extras.push("both Student and Welch rows");
-		if (extras.length > 0)
-			notes.push("This table has extras some courses don't use: " + extras.join(", ") + ". To drop them, untick them in JASP and save; this table updates by itself.");
+			notes.push("JASP gives two versions of the t test: Student's assumes both groups vary about equally, Welch's doesn't. Most reports give one; check your marking guide. To drop the other, untick it in JASP under Tests (Student or Welch)." + safe);
+		if (/VS-MPR/.test(item.apa.text))
+			notes.push("VS-MPR is an extra most courses don't use. To drop it and its footnote, untick \u201cVovk-Sellke maximum p-ratio\u201d in JASP (in t tests, under Additional Statistics)." + safe);
 		return notes;
 	}
 
-	// The change list: every rule that changed something, with each distinct change as before -> after
-	function toggleChanges(item, open) {
+	// The change list: every rule that changed something, one line each; a click opens the reason and each change
+	function toggleChanges(item, open, fromKeyboard) {
 		if (!item || !item.changesPanel)
 			return;
 		const panel = item.changesPanel;
 		const show = open === undefined ? panel.hidden : open;
 		if (show && panel.childElementCount === 0)
-			fillChanges(panel, item.apa.changes || []);
+			fillChanges(panel, item.apa.changes || [], item);
 		panel.hidden = !show;
 		item.changesButton.setAttribute("aria-expanded", String(show));
 		item.changesButton.classList.toggle("on", show);
+		if (show && fromKeyboard)
+			panel.querySelector(".lead").focus();
 	}
 
-	function fillChanges(panel, changes) {
+	function fillChanges(panel, changes, item) {
 		const cells = changes.reduce(function (n, c) { return n + c.cells; }, 0);
-		panel.appendChild(el("p", { class: "lead" }, [
+		panel.appendChild(el("p", { class: "lead", tabindex: "-1" }, [
 			el("strong", { text: "Your results are the same as in JASP." }),
-			" Only rounding, symbols, wording and layout changed to match APA 7 (" + plural(changes.length, "change", "changes") + (cells > 0 ? ", " + plural(cells, "cell", "cells") : "") + "). Each change shows the table as JASP shows it \u2192 the APA version."
+			" Only rounding, symbols, wording and layout changed to match APA 7 (" + plural(changes.length, "change", "changes") + (cells > 0 ? ", " + plural(cells, "cell", "cells") : "") + "). Open a change to see each value as JASP shows it → the APA version."
 		]));
 		const fragment = function (html, empty) {
 			const span = el("span", { class: "v" + (html === "" ? " none" : "") });
@@ -554,34 +719,46 @@
 				span.innerHTML = html;  // table content, inserted like the preview itself
 			return span;
 		};
+		const plainOf = function (html) { const d = document.createElement("div"); d.innerHTML = html; return d.textContent; };
 		const list = el("ol", { class: "rules" });
 		for (const change of changes) {
 			const facts = [];
 			if (change.cells > 0)
 				facts.push(plural(change.cells, "cell", "cells"));
 			if (change.shape)
-				facts.push(change.shape.from.rows + " \u00D7 " + change.shape.from.columns + " \u2192 " + change.shape.to.rows + " \u00D7 " + change.shape.to.columns + " (rows \u00D7 columns)");
+				facts.push(change.shape.from.rows + " × " + change.shape.from.columns + " → " + change.shape.to.rows + " × " + change.shape.to.columns + " (rows × columns)");
 			else if (change.removed > 0)
 				facts.push(plural(change.removed, "cell", "cells") + " removed");
-			const entry = el("li", {}, [
-				el("div", { class: "rule" }, [el("strong", { text: change.rule }), facts.length ? el("span", { class: "facts", text: facts.join(", ") }) : null].filter(Boolean)),
-				el("p", { class: "why", text: change.detail })
-			]);
+			const toggle = el("button", { type: "button", class: "rule", "aria-expanded": "false" }, [
+				el("span", { class: "chev", "aria-hidden": "true" }),
+				el("strong", { text: change.rule }),
+				facts.length ? el("span", { class: "facts", text: facts.join(", ") }) : null
+			].filter(Boolean));
+			const body = el("div", { class: "rule-body" }, [el("p", { class: "why", text: change.detail })]);
+			body.hidden = true;
+			toggle.addEventListener("click", function () {
+				const open = body.hidden;
+				body.hidden = !open;
+				toggle.setAttribute("aria-expanded", String(open));
+			});
 			if (change.examples.length > 0) {
 				const pairs = el("ul", { class: "pairs" });
 				change.examples.forEach(function (example, i) {
 					const row = el("li", {}, [
 						fragment(example.from, "(nothing)"),
-						el("span", { class: "arrow", "aria-label": "becomes", text: "\u2192" }),
+						el("span", { class: "arrow", "aria-label": "becomes", text: "→" }),
 						fragment(example.to, "(removed)")
 					]);
+					// Only a highlight was added: say why, since the words look the same
+					if (example.from !== "" && plainOf(example.from) === plainOf(example.to) && /<mark>/.test(example.to))
+						row.appendChild(el("span", { class: "times", text: "highlighted for you to explain" }));
 					if (example.times > 1)
-						row.appendChild(el("span", { class: "times", text: "\u00D7" + example.times }));
+						row.appendChild(el("span", { class: "times", text: "×" + example.times }));
 					if (i >= 6)
 						row.hidden = true;
 					pairs.appendChild(row);
 				});
-				entry.appendChild(pairs);
+				body.appendChild(pairs);
 				if (change.examples.length > 6) {
 					const extra = change.examples.length - 6;
 					const more = el("button", { type: "button", class: "more", "aria-expanded": "false", text: "Show " + extra + " more" });
@@ -591,15 +768,22 @@
 						more.setAttribute("aria-expanded", String(open));
 						more.textContent = open ? "Show less" : "Show " + extra + " more";
 						if (!open && more.getBoundingClientRect().top < 0)
-							entry.scrollIntoView({ block: "nearest", behavior: state.reduced ? "auto" : "smooth" });
+							body.scrollIntoView({ block: "nearest", behavior: state.reduced ? "auto" : "smooth" });
 					});
-					entry.appendChild(more);
+					body.appendChild(more);
 				}
 			}
-			list.appendChild(entry);
+			list.appendChild(el("li", {}, [toggle, body]));
 		}
 		panel.appendChild(list);
+		const hide = el("button", { type: "button", class: "btn quiet hide-changes", text: "Hide changes" });
+		hide.addEventListener("click", function () {
+			toggleChanges(item, false);
+			item.changesButton.focus();
+		});
+		panel.appendChild(hide);
 	}
+
 
 	// Which to-do a highlighted spot belongs to, from where it sits in the table
 	function spotKind(spot) {
@@ -612,7 +796,7 @@
 	}
 
 	// Moves to the next highlighted spot of one kind (or any kind) in a table
-	function showHighlight(item, kind) {
+	function flashHighlight(item, kind) {
 		if (!state.highlights)
 			setHighlights(true);
 		const spots = Array.from(item.card.querySelectorAll(".paper [style*=\"#ffff00\"]"))
@@ -622,8 +806,11 @@
 		item.spot = item.spotKind === kind ? ((item.spot === undefined ? -1 : item.spot) + 1) % spots.length : 0;
 		item.spotKind = kind;
 		const spot = spots[item.spot];
+		// Scroll only if the spot is out of sight, and keep the help box above it in view
 		const box = $id("tables");
-		scrollTablesTo(box.scrollTop + spot.getBoundingClientRect().top - box.getBoundingClientRect().top - box.clientHeight / 2);
+		const view = box.getBoundingClientRect(), at = spot.getBoundingClientRect();
+		if (at.top < view.top + 40 || at.bottom > view.bottom - 40)
+			scrollTablesTo(box.scrollTop + at.top - view.top - box.clientHeight / 3);
 		const tray = spot.closest(".tray");
 		if (tray && tray.scrollWidth > tray.clientWidth)
 			tray.scrollLeft += spot.getBoundingClientRect().left - tray.getBoundingClientRect().left - tray.clientWidth / 2;
@@ -643,10 +830,12 @@
 		for (const group of state.groups) {
 			let groupShown = 0;
 			for (const item of group.items) {
-				const copied = state.copied.has(item.key);
+				const copied = copyState(item) === "ok";
 				const inFilter = state.filter === "all" || (item.apa && !item.left && (state.filter === "done") === copied);
+				// By number, by title, or (three letters or more) by a variable or label in the table ("adverts", "Welch")
 				const inQuery = !query || (numberQuery ? item.number === +numberQuery[2]
-					: (item.title + " " + item.rawTitle + " " + group.title).toLowerCase().indexOf(query) !== -1);
+					: (item.title + " " + item.rawTitle + " " + group.title).toLowerCase().indexOf(query) !== -1
+					|| (query.length >= 3 && item.apa && searchText(item, group).indexOf(query) !== -1));
 				const matches = inFilter && inQuery;
 				item.card.hidden = !matches;
 				item.link.hidden = !matches;
@@ -699,6 +888,13 @@
 		$id("searchClear").hidden = !state.query;
 		rove();
 		updateMenu();
+	}
+
+	// The words in a table (labels and headings, not numbers) and its analysis's variables, for search
+	function searchText(item, group) {
+		if (item.searchText === undefined)
+			item.searchText = (item.apa.text.split("\n").slice(2).join(" ").replace(/[-−]?\d[\d.,]*/g, " ") + " " + (group.variables || []).join(" ")).toLowerCase();
+		return item.searchText;
 	}
 
 	function clearSearch() {
@@ -851,9 +1047,16 @@
 	}
 
 	function markCopied(item) {
-		state.copied.add(item.key);
+		state.copied.set(item.key, { n: item.number, h: contentHash(item) });
+		saveCopied();
 		updateMark(item);
+		updateCardState(item);
 		updateProgress();
+		// In the "To copy" view, a copied table leaves the list once the button has said "Copied"
+		if (state.filter === "todo") {
+			clearTimeout(markCopied.refilter);
+			markCopied.refilter = setTimeout(applyFilter, 1400);
+		}
 	}
 
 	// Blurs the button's label out, swaps it, and blurs the new one in
@@ -995,6 +1198,7 @@
 		button.setAttribute("aria-label", label);
 		button.title = label + " (B)";
 		button.classList.toggle("off", !on);
+		showBarProgress();
 	}
 
 	function setHighlights(on) {
@@ -1031,7 +1235,43 @@
 		drawRecent();
 	}
 
+	// Back to the start screen
+	function closeFile() {
+		state.file = null;
+		state.path = null;
+		state.name = "";
+		state.groups = [];
+		state.copied = new Map();
+		$id("tables").textContent = "";
+		$id("side").textContent = "";
+		$id("empty").hidden = false;
+		$id("layout").hidden = true;
+		$id("filePill").hidden = true;
+		$id("sideButton").hidden = true;
+		$id("searchWrap").hidden = true;
+		$id("barProgress").hidden = true;
+		$id("closeFile").hidden = true;
+		$id("fileRule").hidden = true;
+		$id("startNumber").disabled = true;
+		$id("openButton").classList.add("primary");
+		document.title = "jAPAsp";
+		if (tauri && tauri.window && tauri.window.getCurrentWindow)
+			tauri.window.getCurrentWindow().setTitle("jAPAsp").catch(function () {});
+		drawRecent();
+		updateMenu();
+	}
+
 	function drawRecent() {
+		// The menu's "Open recent" list: the other recent files, so they can be reached with a file open
+		const menuList = $id("menuRecentList");
+		menuList.textContent = "";
+		const others = state.recent.filter(function (p) { return p !== state.path; }).slice(0, 5);
+		$id("menuRecent").hidden = !tauri || others.length === 0;
+		for (const path of others) {
+			const open = el("button", { type: "button", title: path }, [el("span", { text: baseName(path) }), el("small", { text: folderOf(path) })]);
+			open.addEventListener("click", function () { toggleMenu(false); openPath(path); });
+			menuList.appendChild(open);
+		}
 		const list = $id("recentList");
 		list.textContent = "";
 		$id("recent").hidden = !tauri || state.recent.length === 0;
@@ -1101,7 +1341,8 @@
 					openPath(state.path, true).then(function () {
 						reloadFailures = 0;
 						spinSync();
-						toast("JASP saved " + state.name + ". Tables updated.");
+						const stale = staleCount();
+						toast("JASP saved " + state.name + ". Tables updated." + (stale > 0 ? " " + plural(stale, "copied table has", "copied tables have") + " changed: copy " + (stale === 1 ? "it" : "them") + " again." : ""));
 					}, function (e) {
 						reloadFailures++;
 						if (reloadFailures === 3)
@@ -1146,6 +1387,11 @@
 		}
 	}
 	menuButton.addEventListener("click", function (e) { e.stopPropagation(); toggleMenu(); });
+	// Tabbing out of the menu closes it, so it never stays open behind the focus
+	menu.addEventListener("focusout", function (e) {
+		if (e.relatedTarget && !menu.contains(e.relatedTarget) && e.relatedTarget !== menuButton)
+			toggleMenu(false);
+	});
 	document.addEventListener("click", function (e) {
 		if (!menu.hidden && !menu.contains(e.target))
 			toggleMenu(false);
@@ -1160,6 +1406,7 @@
 		else if (name === "zoom-in") setZoom(state.zoom + 0.1);
 		else if (name === "zoom-out") setZoom(state.zoom - 0.1);
 		else if (name === "shortcuts") { toggleMenu(false); $id("keys").showModal(); }
+		else if (name === "close-file") { toggleMenu(false); closeFile(); }
 		else if (name === "feedback") { toggleMenu(false); openFeedback(); }
 		else if (name === "credit") { toggleMenu(false); openLink(links.profile); }
 	});
@@ -1170,10 +1417,12 @@
 		if (state.file) {
 			state.current = null;
 			render();
-			toast("Tables now start at Table " + n + ".");
+			const stale = staleCount();
+			toast("Tables now start at Table " + n + "." + (stale > 0 ? " " + plural(stale, "copied table has", "copied tables have") + " a new number: copy " + (stale === 1 ? "it" : "them") + " again." : ""));
 		}
 	});
 	$id("showHighlights").addEventListener("change", function () { setHighlights(this.checked); });
+	$id("singleKeys").addEventListener("change", function () { state.singleKeys = this.checked; settings.write("singleKeys", this.checked); });
 	$id("reduceEffects").addEventListener("change", function () {
 		state.reduced = this.checked;
 		settings.write("reduced", this.checked);
@@ -1221,6 +1470,8 @@
 		const mod = e.ctrlKey || e.metaKey;
 		const key = e.key;
 
+		if ($id("keys").open)
+			return;  // the shortcuts window handles its own keys (Esc closes it)
 		if (key === "Escape") {
 			if (!menu.hidden) { toggleMenu(false); menuButton.focus(); return; }
 			if (isNarrow() && $id("layout").classList.contains("drawer-open")) { setDrawer(false); return; }
@@ -1234,7 +1485,8 @@
 		if (mod && (key === "=" || key === "+")) { e.preventDefault(); setZoom(state.zoom + 0.1); return; }
 		if (mod && (key === "-" || key === "_")) { e.preventDefault(); setZoom(state.zoom - 0.1); return; }
 		if (mod && key === "0") { e.preventDefault(); setZoom(1); return; }
-		if (typing || mod || e.altKey || !state.file || $id("keys").open)
+		if (key === "?" && !typing && !mod) { $id("keys").showModal(); return; }
+		if (typing || mod || e.altKey || !state.file || !state.singleKeys)
 			return;
 		if (key === "/") { e.preventDefault(); search.focus(); }
 		else if (key === "j" || key === "J") step(1);
@@ -1242,10 +1494,9 @@
 		else if (key === "C" && e.shiftKey) copyAll(false);
 		else if (key === "c" || key === "C") copyItem(currentItem(), false);  // C without Shift is Caps Lock
 		else if (key === "t" || key === "T") copyItem(currentItem(), true);
-		else if (key === "w" || key === "W") toggleChanges(currentItem());
+		else if (key === "w" || key === "W") toggleChanges(currentItem(), undefined, true);
 		else if (key === "b" || key === "B") toggleSidebar();
 		else if (key === "h" || key === "H") { setHighlights(!state.highlights); toast(state.highlights ? "Highlights shown in the preview." : "Highlights hidden in the preview. Copies still have them."); }
-		else if (key === "?") $id("keys").showModal();
 	});
 
 	// Dropping files
@@ -1297,6 +1548,8 @@
 		next.focus();
 	}, true);
 	$id("autoReload").checked = state.autoReload;
+	$id("singleKeys").checked = state.singleKeys;
+	$id("barProgress").addEventListener("click", function () { if (isNarrow()) setDrawer(true); else setSidebar(true); });
 	$id("reduceEffects").checked = state.reduced;
 	$id("startNumber").value = String(fileSettings().start);
 	drawRecent();

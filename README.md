@@ -1,6 +1,6 @@
 # jAPAsp
 
-jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results table in it into an APA 7 table. Click **Copy APA table** and paste into Word or Google Docs. The tables are drawn by JASP's own code, so they show the same values JASP does.
+jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results table in it into an APA 7 table. Click **Copy APA table** and paste into Word or Google Docs. The tables are drawn by JASP's own code, so they show the same values JASP does. Your JASP file is only read, never changed.
 
 ![jAPAsp with the Album Sales example open](docs/screenshot.png)
 
@@ -23,22 +23,24 @@ jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results
 
 In the app:
 
-- **Only the tables for your report:** assumption checks (normality, equal variances) start out of the numbering, and you can leave out or put back any table. The tables after it are renumbered.
-- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns. The list shows which tables you've copied.
+- **Only the tables for your report:** assumption checks (normality, equal variances) start out of the numbering, and you can leave out or put back any table. The tables after it are renumbered. Two descriptives tables with the same numbers are pointed out.
+- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns. The list shows which tables you've copied, remembers it for next time, and says what's still to do in your document. If a copied table gets a new number or new values, it asks you to copy it again.
 - **See what changed:** **What changed** on each table (or <kbd>W</kbd>) lists every APA 7 rule that changed something, with each value before and after ("Std. Deviation" to *SD*, "0.3967" to ".40") and the APA section it comes from.
 - **Reloads when JASP saves the file**, keeping your place. If the file can't be read, it says so and keeps trying.
-- **Find and filter:** search tables by name or number ("table 3"), or show only the tables still to copy.
+- **Find and filter:** search tables by name, number ("table 3") or a variable in them ("adverts"), or show only the tables still to copy.
 - **Number the first table** to match your paper (start at Table 4 if three tables come before). Each file remembers its own.
 - **Light, dark and pink themes**, or follow the system. Works in a narrow window too: the table list opens as a drawer.
 - **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
 - **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in (needs a free GitHub account).
-- **Recent files**, preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>).
+- **Recent files** (also in the menu once a file is open), preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>). Single-key shortcuts can be turned off in the menu, for screen readers.
 
 ## Install
 
-**Windows** (10 or 11): download [install.cmd](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/install.cmd) and double-click it. If Windows asks whether to run it, choose **Run** (or **More info**, then **Run anyway**). Run it again whenever you want to update.
+**Windows** (10 or 11): download [install.cmd](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/install.cmd) and double-click it. Windows warns about apps from small developers that few people have downloaded yet: choose **Run** (or **More info**, then **Run anyway**). Run it again whenever you want to update.
 
-**Mac and Linux:** open Terminal, paste this line and press Return. Run it again to update.
+**Mac:** download [jAPAsp-install-mac.zip](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/jAPAsp-install-mac.zip), open it, then right-click **install.command** and choose **Open** (a double-click is blocked the first time for apps from outside the App Store). Run it again to update.
+
+**Linux**, or from Terminal on a Mac: paste this line and press Return. Run it again to update.
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.sh | sh
@@ -52,7 +54,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/one
 
 - Windows: jAPAsp goes in `%LOCALAPPDATA%\Programs\japasp`, with a Start menu entry.
 - Linux: jAPAsp goes in `~/.local/share/japasp`, with an app menu entry and the `japasp` command in `~/.local/bin`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch); the installer tells you if it's missing.
-- macOS: installed like on Linux, started with `japasp`. It is built for macOS but not tested there.
+- macOS: installed like on Linux, started with `japasp`.
 
 ## Use
 
@@ -68,6 +70,7 @@ To see a file's tables as JSON instead: `japasp --json results.jasp`.
 - Only what is saved in the file is shown. Save again in JASP and the app reloads the tables by itself.
 - Tables are numbered in the order they appear in the file, from the number set in the menu.
 - **Limitation:** means, *SD*s and similar values always keep the zero before the decimal point (0.45), as APA asks for statistics that can be greater than 1. For a variable that can't go above 1, such as a proportion from 0 to 1, APA's rule would also allow .45, but the app can't tell a variable's limits from the file. Remove those zeros by hand if you want them gone.
+- macOS builds are new: tell us through **Feedback and problems** if anything looks wrong.
 - The APA code sits in JASP's own results-page code (`ui/vendor/jasp`), so the tables come out as JASP draws them.
 - Building from source and the tests: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 

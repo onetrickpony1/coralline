@@ -34,7 +34,9 @@
 	if (byName["Fear of Statistics"])
 		expect(/N = 2,571\./.test(note("Fear of Statistics", 1)), "reliability: N = 2,571 from the data");
 	if (byName["Beer Goggles"])
-		expect(/N = 48\./.test(note("Beer Goggles", 3)), "simple main effects: N = 48 from the ANOVA table");
+		expect(/N = 48\./.test(note("Beer Goggles", 2)), "simple main effects: N = 48 from the ANOVA table");
+	if (byName["Beer Goggles"])
+		expect([].concat.apply([], byName["Beer Goggles"].map(function (g) { return g.items; })).some(function (i) { return /Levene/.test(i.rawTitle) && i.check && !i.number; }), "Levene's test (\"Test for Equality of Variances\") starts out of the report");
 	// The page shows the last file: its cards must be there with copy buttons
 	expect(document.querySelectorAll(".card button.primary").length > 0, "cards with copy buttons are shown");
 	expect(document.querySelectorAll(".side a").length === document.querySelectorAll(".card").length, "one sidebar link per card");

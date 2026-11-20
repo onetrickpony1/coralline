@@ -1021,6 +1021,7 @@ function _apaGrid(rows) {
 function _apaSentence(text) {
 	// Notes are joined into one paragraph, so each must end like a sentence. Also drops stray spaces before punctuation.
 	text = String(text).trim()
+		.replace(/<(em|i|b|strong)>[ \u00A0]+/g, "<$1>").replace(/[ \u00A0]+<\/(em|i|b|strong)>/g, "</$1>")  // "<em> Treat </em>" -> "<em>Treat</em>"
 		.replace(/[ \u00A0]+([.,;:])(?=\s|$|<)/g, "$1")	// "group Treat ." -> "group Treat."
 		.replace(/([A-Za-z>]) -(?=[A-Za-z])/g, "$1-")		// "p -value" -> "p-value"
 		.replace(/,(?=[A-Za-z])/g, ", ");					// "p-value,the" -> "p-value, the"
@@ -2161,6 +2162,12 @@ function buildAPATable(tableElement, info, tableNumber) {
 	log.step(i18n("Confusion matrix"), i18n("Observed and predicted classes get their own headings."), function () { _apaConfusionMatrix(table, titleText); });
 	log.step(i18n("Pairs and paths"), i18n("Pairs and paths split over several columns (A, -, B) become one column with one heading."), function () { _apaMergePairColumns(table); });
 	log.step(i18n("Empty columns"), i18n("Columns with nothing in them are removed."), function () { _apaDropEmptyColumns(table); });
+	log.step(i18n("Group sizes"), i18n("Counts for each group are n; N is the whole sample (APA 7, Table 6.5)."), function () {
+		// A table with a Group column gives each group's size: n, as in the descriptives turned to APA orientation
+		let heads = $table.children("thead").children("tr").last().children().toArray();
+		if (heads.some(function (cell) { return _apaLabel(cell) === "Group"; }))
+			heads.filter(function (cell) { return _apaLabel(cell) === "N"; }).forEach(function (cell) { cell.textContent = "n"; });
+	});
 	log.step(i18n("Statistic column"), i18n("A column naming the statistics in each row gets a heading."), function () { _apaStatisticColumn(table); });
 	let isCorrelationMatrix = log.step(i18n("Correlation matrix"), i18n("Variables numbered in the rows and named by number across the top, with dashes on the diagonal, as in APA's sample correlation table."), function () { return _apaCorrelationMatrix(table); });
 	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(titleText) || /Pearson|Spearman|Kendall/.test(table.textContent));
