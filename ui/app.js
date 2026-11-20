@@ -38,7 +38,9 @@
 						title: model.get("title"),
 						subtitle: model.get("subtitle"),
 						footnotes: model.get("footnotes"),
-						otherTables: plain.filter(function (_, j) { return j !== i; })
+						otherTables: plain.map(function (table, j) { return { table: table, title: models[j].get("title") }; })
+							.filter(function (_, j) { return j !== i; }),
+						dataSampleSize: analysis.sampleSize  // counted from the saved data, used when the tables don't say
 					}, number);
 				} catch (e) {
 					item.error = String(e && e.message || e);

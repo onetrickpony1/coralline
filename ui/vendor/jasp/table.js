@@ -1579,7 +1579,10 @@ function apaSampleSize(tableElement, title, otherTables) {
 	 * The sample size for the table note ("N = 200"), from what the analysis itself reports, so missing values and
 	 * filters are already accounted for. Returns { shown: true } when the table already shows it, { n: 200 } when
 	 * every source agrees, { varies: true } when the variables have different sizes, or {} when nothing says.
+	 * otherTables are <table> elements whose first heading row is the title, or { table, title } objects.
 	 */
+	let tableOf = function (other) { return other && other.table ? other.table : other; };
+	let titleOf = function (other) { return other && other.table ? _apaPlain(other.title || "") : $(other).children("thead").children("tr").first().text(); };
 	let isCount = /^(N|n|Valid|Count)$/;
 	let own = _apaReadTable(tableElement);
 	let ownLabels = own.heads.concat(own.body.map(function (row) { return row[0]; }), own.body.map(function (row) { return row[1] || ""; }));
@@ -1595,7 +1598,7 @@ function apaSampleSize(tableElement, title, otherTables) {
 
 	// Counts in the analysis's other tables: an N column (summed over groups), or Valid / n rows
 	for (let other of otherTables || []) {
-		let t = _apaReadTable(other);
+		let t = _apaReadTable(tableOf(other));
 		let nCol = t.heads.findIndex(function (h) { return /^(N|n)$/.test(h); });
 		if (nCol >= 0) {
 			let grouped = t.heads.some(function (h, c) { return c > 0 && c < nCol && h !== ""; });
@@ -1647,9 +1650,9 @@ function apaSampleSize(tableElement, title, otherTables) {
 	dfFrom(own, title);
 	dfPair(own, title);
 	for (let other of otherTables || []) {
-		let titleCell = $(other).children("thead").children("tr").first().text();
-		dfFrom(_apaReadTable(other), titleCell);
-		dfPair(_apaReadTable(other), titleCell);
+		let titleCell = titleOf(other);
+		dfFrom(_apaReadTable(tableOf(other)), titleCell);
+		dfPair(_apaReadTable(tableOf(other)), titleCell);
 	}
 
 	let all = [].concat(...found);
@@ -1915,6 +1918,9 @@ function buildAPATable(tableElement, info, tableNumber) {
 
 	// Sample size in the note, unless the table shows it
 	let sample = matrixN !== null ? { n: matrixN } : turned.n !== null && turned.n !== undefined ? { n: turned.n } : turned.turned ? { shown: true } : apaSampleSize(tableElement, _apaPlain(info.title), info.otherTables);
+	// Last resort: a count from the data, when the caller has one ({ n } or { varies: true })
+	if (!sample.shown && sample.n === undefined && !sample.varies && info.dataSampleSize)
+		sample = info.dataSampleSize;
 	if (sample.n !== undefined)
 		notes.general.unshift("<i>N</i> = " + (sample.n >= 1000 ? sample.n.toLocaleString("en") : sample.n) + ".");
 	else if (!sample.shown) {

@@ -28,6 +28,7 @@ if not m or not m.group(1):
     sys.exit("FAIL: the page did not finish (a script error?)")
 r = json.loads(html.unescape(m.group(1)))
 print("tables:", r["tables"], "errors:", len(r["errors"]), "failed checks:", len(r["failures"]))
+for line in r.get("missingN", []): print("   no N:", line)
 for line in r["errors"] + r["failures"]:
     print("  ", line)
 sys.exit(1 if r["errors"] or r["failures"] or r["tables"] == 0 else 0)

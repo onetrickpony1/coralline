@@ -29,8 +29,15 @@
 		expect(/N = 44\./.test(note("Directed Reading Activities", 1)), "t-test: N = 44");
 	if (byName["Beer Goggles"])
 		expect(/N = 48\./.test(note("Beer Goggles", 1)), "ANOVA: N = 48");
+	if (byName["Exam Anxiety"])
+		expect(/N = 103\./.test(note("Exam Anxiety", 1)), "correlation without n: N = 103 from the data");
+	if (byName["Fear of Statistics"])
+		expect(/N = 2,571\./.test(note("Fear of Statistics", 1)), "reliability: N = 2,571 from the data");
+	if (byName["Beer Goggles"])
+		expect(/N = 48\./.test(note("Beer Goggles", 3)), "simple main effects: N = 48 from the ANOVA table");
 	// The page shows the last file: its cards must be there with copy buttons
 	expect(document.querySelectorAll(".card button.primary").length > 0, "cards with copy buttons are shown");
 	expect(document.querySelectorAll(".side a").length === document.querySelectorAll(".card").length, "one sidebar link per card");
+	out.missingN = [].concat.apply([], Object.keys(byName).map(function (f) { return [].concat.apply([], byName[f].map(function (g) { return g.items.filter(function (i) { return i.apa && /add sample size|sample sizes differ/.test(i.apa.text); }).map(function (i) { return f + " / " + g.title + " / " + i.title; }); })); }));
 	document.getElementById("result").textContent = JSON.stringify(out);
 })();

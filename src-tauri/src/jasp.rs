@@ -28,6 +28,11 @@ pub struct Analysis {
     pub title: String,
     /// JASP's table objects, unchanged: title, schema, data, footnotes, ...
     pub tables: Vec<Value>,
+    /// N counted from the saved data, for tables that don't report it (see data.rs)
+    #[serde(rename = "sampleSize", skip_serializing_if = "Option::is_none")]
+    pub sample_size: Option<crate::data::SampleSize>,
+    #[serde(skip)]
+    options: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,7 +54,23 @@ pub fn read<R: Read + Seek>(reader: R) -> Result<JaspFile, Error> {
         Err(zip::result::ZipError::FileNotFound) => return Err(Error::NoResults),
         Err(e) => return Err(e.into()),
     }
-    parse_analyses(&serde_json::from_str(&text)?)
+    let mut file = parse_analyses(&serde_json::from_str(&text)?)?;
+    count_samples(&mut archive, &mut file);
+    Ok(file)
+}
+
+/// Adds the sample sizes counted from `internal.sqlite`. A file without data, or data that can't be read, just
+/// gets none: the tables' own numbers still work.
+fn count_samples<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, file: &mut JaspFile) {
+    let Ok(mut entry) = archive.by_name("internal.sqlite") else { return };
+    let Ok(mut temp) = tempfile::NamedTempFile::new() else { return };
+    if std::io::copy(&mut entry, temp.as_file_mut()).is_err() {
+        return;
+    }
+    let Ok(data) = crate::data::Data::open(temp.path()) else { return };
+    for analysis in &mut file.analyses {
+        analysis.sample_size = data.sample_size(&analysis.options);
+    }
 }
 
 pub fn parse_analyses(root: &Value) -> Result<JaspFile, Error> {
@@ -70,6 +91,8 @@ pub fn parse_analyses(root: &Value) -> Result<JaspFile, Error> {
                 name: text(a.get("name")),
                 title: text(a.get("title")),
                 tables,
+                sample_size: None,
+                options: a.get("options").cloned().unwrap_or(Value::Null),
             }
         })
         .collect();
@@ -214,5 +237,33 @@ mod tests {
             }
         }
         assert!(tables > 0);
+        let reliability = dir.join("Fear of Statistics.jasp");
+        if reliability.exists() {
+            let file = read_path(&reliability).unwrap();
+            assert!(matches!(file.analyses[0].sample_size, Some(crate::data::SampleSize::N(n)) if n > 0));
+        }
+    }
+
+    #[test]
+    fn sample_size_comes_from_the_saved_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("internal.sqlite");
+        crate::data::tests::sample_db(&db);
+        let analyses = json!({ "analyses": [{ "id": 1, "name": "X", "title": "X", "results": {},
+            "options": { ".meta": { "variables": { "shouldEncode": true } }, "variables": { "types": ["scale"], "value": ["y"] } } }] });
+        let mut buffer = Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buffer);
+            let options = zip::write::SimpleFileOptions::default();
+            z.start_file("analyses.json", options).unwrap();
+            z.write_all(analyses.to_string().as_bytes()).unwrap();
+            z.start_file("internal.sqlite", options).unwrap();
+            z.write_all(&std::fs::read(&db).unwrap()).unwrap();
+            z.finish().unwrap();
+        }
+        buffer.set_position(0);
+        let file = read(buffer).unwrap();
+        assert_eq!(file.analyses[0].sample_size, Some(crate::data::SampleSize::N(4)));
+        assert_eq!(serde_json::to_value(&file).unwrap()["analyses"][0]["sampleSize"], json!({ "n": 4 }));
     }
 }

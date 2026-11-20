@@ -1,0 +1,230 @@
+//! Counts the sample size of an analysis from the data saved in the `.jasp` file (`internal.sqlite`).
+//!
+//! Used only when the analysis's own tables don't report N. The count is the number of rows that pass the
+//! data filter and have a value in every variable the analysis uses. It is given only when it is the N the
+//! analysis used: when none of those variables has missing values, or when the analysis drops incomplete
+//! rows (listwise). With missing values and pairwise or per-variable handling, N differs per test.
+
+use rusqlite::Connection;
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::BTreeSet;
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum SampleSize {
+    /// One N for the whole analysis
+    N(u64),
+    /// Variables have different numbers of values
+    Varies,
+}
+
+/// The dataset: column names and their stored columns, plus the filter column
+pub struct Data {
+    connection: Connection,
+    table: String,
+    filter: Option<String>,
+    columns: Vec<(String, String)>,
+}
+
+/// JASP's integer code for a missing value in nominal and ordinal columns
+const MISSING_INT: i64 = i32::MIN as i64;
+
+impl Data {
+    pub fn open(path: &std::path::Path) -> rusqlite::Result<Data> {
+        let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let data_set: i64 = connection.query_row("SELECT id FROM DataSets ORDER BY id LIMIT 1", [], |r| r.get(0))?;
+        let table = format!("DataSet_{data_set}");
+        let stored: BTreeSet<String> = {
+            let mut statement = connection.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
+            let names = statement.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<_, _>>()?;
+            names
+        };
+        let filter = connection
+            .query_row("SELECT id FROM Filters WHERE dataSet = ?1 ORDER BY id LIMIT 1", [data_set], |r| r.get::<_, i64>(0))
+            .ok()
+            .map(|id| format!("Filter_{id}"))
+            .filter(|name| stored.contains(name));
+        let columns = {
+            let mut statement = connection.prepare("SELECT id, name FROM Columns WHERE dataSet = ?1")?;
+            let rows = statement
+                .query_map([data_set], |r| Ok((r.get::<_, String>(1)?, format!("Column_{}", r.get::<_, i64>(0)?))))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.into_iter().filter(|(_, stored_as)| stored.contains(stored_as)).collect()
+        };
+        Ok(Data { connection, table, filter, columns })
+    }
+
+    fn stored(&self, name: &str) -> Option<&str> {
+        self.columns.iter().find(|(n, _)| n == name).map(|(_, s)| s.as_str())
+    }
+
+    fn count(&self, columns: &[&str]) -> rusqlite::Result<u64> {
+        let mut conditions: Vec<String> = columns
+            .iter()
+            .map(|c| format!("\"{c}\" IS NOT NULL AND \"{c}\" <> {MISSING_INT}"))
+            .collect();
+        if let Some(filter) = &self.filter {
+            conditions.push(format!("\"{filter}\" = 1"));
+        }
+        let condition = if conditions.is_empty() { "1".to_string() } else { conditions.join(" AND ") };
+        self.connection
+            .query_row(&format!("SELECT COUNT(*) FROM \"{}\" WHERE {condition}", self.table), [], |r| r.get(0))
+    }
+
+    /// N for an analysis, from its options. None when it uses no known variables.
+    pub fn sample_size(&self, options: &Value) -> Option<SampleSize> {
+        // With a counts, frequency or weights variable, each row stands for many cases: rows aren't N
+        for key in ["counts", "count", "frequency", "weights", "weight", "frequencyVariable", "countVariable"] {
+            let mut weighted = BTreeSet::new();
+            if let Some(value) = options.get(key) {
+                strings(value, &mut weighted);
+            }
+            if weighted.iter().any(|n| self.stored(n).is_some()) {
+                return None;
+            }
+        }
+        let mut names = BTreeSet::new();
+        variables(options, &mut names);
+        let stored: Vec<&str> = names.iter().filter_map(|n| self.stored(n)).collect();
+        if stored.is_empty() {
+            return None;
+        }
+        let complete = self.count(&stored).ok()?;
+        let rows = self.count(&[]).ok()?;
+        let any_missing = stored.iter().any(|c| self.count(&[c]).map_or(true, |n| n != rows));
+        let listwise = options.get("naAction").and_then(Value::as_str).is_none_or(|a| a == "listwise");
+        if !any_missing || listwise {
+            Some(SampleSize::N(complete))
+        } else {
+            Some(SampleSize::Varies)
+        }
+    }
+}
+
+/// The variable names in an analysis's options: the options marked `shouldEncode` in `.meta`.
+pub fn variables(options: &Value, out: &mut BTreeSet<String>) {
+    let Some(meta) = options.get(".meta").and_then(Value::as_object) else { return };
+    for (key, info) in meta {
+        if info.get("shouldEncode").and_then(Value::as_bool) == Some(true) {
+            if let Some(value) = options.get(key) {
+                strings(value, out);
+            }
+        }
+    }
+}
+
+/// Every string in an option's value ({ types, value }, lists, nested lists and rows), except type names
+fn strings(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::String(s) if !s.is_empty() => {
+            out.insert(s.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+        Value::Object(map) => {
+            for (key, v) in map {
+                if key != "types" && key != "optionKey" && key != "contrast" {
+                    strings(v, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A dataset like JASP's: 5 rows, x has one missing value, row 5 is filtered out
+    pub fn sample_db(path: &std::path::Path) {
+        let c = Connection::open(path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE DataSets (id INTEGER PRIMARY KEY);
+             CREATE TABLE Filters (id INTEGER PRIMARY KEY, dataSet INT);
+             CREATE TABLE Columns (id INTEGER PRIMARY KEY, dataSet INT, name TEXT);
+             INSERT INTO DataSets VALUES (1);
+             INSERT INTO Filters VALUES (1, 1);
+             INSERT INTO Columns VALUES (1, 1, 'x'), (2, 1, 'y'), (3, 1, 'group');
+             CREATE TABLE DataSet_1 (rowNumber INTEGER PRIMARY KEY, Filter_1 INT NOT NULL DEFAULT 1, Column_1 NUM NULL, Column_2 NUM NULL, Column_3 NUM NULL);
+             INSERT INTO DataSet_1 VALUES (1, 1, 1.0, 2.0, 0), (2, 1, NULL, 3.0, 1), (3, 1, 2.0, 4.0, 0), (4, 1, 3.0, 5.0, -2147483648), (5, 0, 4.0, 6.0, 1);",
+        )
+        .unwrap();
+    }
+
+    fn options(vars: Value, na: Option<&str>) -> Value {
+        let mut o = json!({ ".meta": { "variables": { "shouldEncode": true }, "plotTitle": {} }, "variables": vars, "plotTitle": "x" });
+        if let Some(na) = na {
+            o["naAction"] = json!(na);
+        }
+        o
+    }
+
+    #[test]
+    fn complete_variables_give_n_without_filtered_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        // y has no missing values; row 5 is filtered out
+        assert_eq!(data.sample_size(&options(json!({ "types": ["scale"], "value": ["y"] }), Some("pairwise"))), Some(SampleSize::N(4)));
+    }
+
+    #[test]
+    fn listwise_counts_complete_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        // x is missing in row 2, group in row 4
+        let o = options(json!({ "types": ["scale", "nominal"], "value": ["x", "group"] }), Some("listwise"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(2)));
+    }
+
+    #[test]
+    fn pairwise_with_missing_values_varies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        let o = options(json!({ "types": ["scale", "scale"], "value": ["x", "y"] }), Some("pairwise"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::Varies));
+    }
+
+    #[test]
+    fn a_counts_variable_means_rows_are_not_cases() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        let mut o = options(json!({ "types": ["scale"], "value": ["y"] }), None);
+        o["counts"] = json!({ "types": ["scale"], "value": "x" });
+        assert_eq!(data.sample_size(&o), None);
+        o["counts"] = json!({ "types": [], "value": "" });  // the option is there but empty
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(4)));
+    }
+
+    #[test]
+    fn unknown_variables_give_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        assert_eq!(data.sample_size(&options(json!({ "types": [], "value": [] }), None)), None);
+    }
+
+    #[test]
+    fn variables_are_found_in_nested_options_but_not_types_or_unmarked_options() {
+        let o = json!({
+            ".meta": { "contrasts": { "shouldEncode": true }, "modelTerms": { "shouldEncode": true }, "title": {} },
+            "contrasts": { "optionKey": "variable", "types": ["nominal"], "value": [{ "contrast": "none", "variable": ["FaceType"] }] },
+            "modelTerms": [{ "components": { "types": ["scale"], "value": [["adverts"]] }, "name": "model1" }],
+            "title": "sales"
+        });
+        let mut names = BTreeSet::new();
+        variables(&o, &mut names);
+        assert!(names.contains("FaceType") && names.contains("adverts"));
+        assert!(!names.contains("nominal") && !names.contains("none") && !names.contains("sales"));
+    }
+}
