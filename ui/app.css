@@ -576,28 +576,44 @@ main { flex: 1; min-height: 0; display: flex; }
 .todo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .todo .lead { font-size: 12.5px; color: var(--ink-2); margin-right: 2px; }
 .todo button {
-	/* A glass pill like the other buttons; the app's one yellow (--todo, the sidebar dots) only as a dot and a tint */
+	/* The same glass as the other buttons (.btn); the app's one yellow (--todo, as in the sidebar) only in the dot */
+	position: relative;
 	display: inline-flex;
 	align-items: center;
 	gap: 7px;
-	font: 500 12.5px/1 var(--font);
-	padding: 6px 11px 6px 9px;
+	height: 28px;
+	font: 550 12.5px/1 var(--font);
+	padding: 0 12px 0 10px;
 	border-radius: 999px;
 	border: 0;
 	cursor: pointer;
 	color: var(--ink);
-	background: linear-gradient(180deg, var(--sheen), transparent 70%), color-mix(in srgb, var(--todo) 10%, var(--glass));
-	box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px var(--hair);
-	transition: transform 0.12s var(--ease), background-color 0.2s, box-shadow 0.2s;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--sheen) 60%, transparent), transparent 60%), var(--accent-soft);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--edge) 70%, transparent), inset 0 0 0 1px var(--hair);
+	transition: transform 0.12s var(--ease), box-shadow 0.2s;
 }
 .todo button::before {
 	content: "";
-	width: 8px;
-	height: 8px;
+	width: 9px;
+	height: 9px;
 	flex: none;
 	background: radial-gradient(circle closest-side, var(--todo) 0 62%, color-mix(in srgb, var(--todo) 70%, var(--todo-ink)) 72%, transparent 100%);
 }
-.todo button:hover { background: linear-gradient(180deg, var(--sheen), transparent 70%), color-mix(in srgb, var(--todo) 22%, var(--glass)); box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px color-mix(in srgb, var(--todo) 60%, var(--hair)); }
+.todo button::after {
+	/* the same breathing halo as the sidebar dots */
+	content: "";
+	position: absolute;
+	left: 6px;
+	top: 50%;
+	width: 17px;
+	height: 17px;
+	margin-top: -8.5px;
+	border-radius: 50%;
+	background: radial-gradient(circle closest-side, color-mix(in srgb, var(--todo) 70%, transparent) 0, transparent 100%);
+	animation: hum 2.4s ease-in-out infinite;
+	pointer-events: none;
+}
+.todo button:hover { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--edge) 70%, transparent), inset 0 0 0 1px var(--accent); }
 .todo button:active { transform: scale(0.97); }
 .todo.ready { color: var(--ok); font-size: 13px; font-weight: 550; }
 .card .error { margin: 0 16px 16px; color: var(--danger); }
