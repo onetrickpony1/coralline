@@ -87,7 +87,140 @@ pub fn render(jasp: &Path) -> Result<serde_json::Value, Error> {
     }
     figures["rerun"] = serde_json::from_str(&std::fs::read_to_string(out.join("rerun.json"))?)?;
     add_originals(jasp, &mut figures);
+    add_trust(jasp, &mut figures);
     Ok(figures)
+}
+
+/// Marks each figure `trusted` when its analysis's rerun reproduced every table the file saved (all values equal,
+/// up to rounding in the last digits). Otherwise `trusted` is false and `why` says what differed: the caller then
+/// shows JASP's own picture. An analysis without tables can't be checked, so its figures aren't trusted either.
+fn add_trust(jasp: &Path, figures: &mut serde_json::Value) {
+    let saved: serde_json::Value = std::fs::File::open(jasp)
+        .ok()
+        .and_then(|f| zip::ZipArchive::new(f).ok())
+        .and_then(|mut a| a.by_name("analyses.json").ok().and_then(|e| serde_json::from_reader(e).ok()))
+        .unwrap_or_default();
+    let rerun = figures.get("rerun").cloned().unwrap_or_default();
+    let analyses = figures.get("analyses").cloned().unwrap_or_default();
+    let Some(list) = figures.get_mut("figures").and_then(|f| f.as_array_mut()) else { return };
+    for figure in list {
+        let index = figure.get("analysis").and_then(|a| a.as_u64()).unwrap_or(0) as usize;
+        let before = saved.get("analyses").and_then(|a| a.get(index.wrapping_sub(1))).and_then(|a| a.get("results"));
+        let after = rerun.get(index.wrapping_sub(1)).filter(|r| !r.is_null());
+        let status = analyses.get(index.wrapping_sub(1)).and_then(|a| a.get("status")).and_then(|s| s.as_str()).unwrap_or("");
+        let saved_analysis = saved.get("analyses").and_then(|a| a.get(index.wrapping_sub(1)));
+        let plot = figure.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let verdict = if status != "complete" {
+            Err(format!("the rerun ended with {}", if status.is_empty() { "no status" } else { status }))
+        } else if let Some(why) = saved_analysis.and_then(|a| random_parts(a, plot)) {
+            Err(why)
+        } else {
+            match (before, after) {
+                (Some(b), Some(a)) => same_tables(b, a),
+                _ => Err("the analysis didn't rerun".to_string()),
+            }
+        };
+        figure["trusted"] = serde_json::Value::Bool(verdict.is_ok());
+        if let Err(why) = verdict {
+            figure["why"] = serde_json::Value::String(why);
+        }
+    }
+}
+
+/// Plots that a rerun can't reproduce exactly even when the tables match: random draws (machine learning,
+/// clustering, forecasts, MCMC, bootstrap, networks) and Bayes factor robustness curves. Their pictures stay JASP's.
+fn random_parts(analysis: &serde_json::Value, plot: &str) -> Option<String> {
+    let name = analysis.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    let random_kind = name.starts_with("ml")
+        || ["Prophet", "Bsts", "JAGS", "Network", "BayesianProcess", "Bain", "LearnBayes", "LS", "audit"].iter().any(|k| name.contains(k));
+    let options = analysis.get("options").and_then(|o| o.as_object());
+    let bootstrap = options.is_some_and(|o| {
+        o.iter().any(|(k, v)| {
+            let k = k.to_lowercase();
+            (k.contains("bootstrap") && v.as_bool() == Some(true)) || (k.contains("cimethod") && v.as_str().is_some_and(|s| s.contains("bootstrap")))
+        })
+    });
+    if random_kind || bootstrap {
+        Some("the analysis has random parts, so a rerun draws a slightly different picture".into())
+    } else if plot.to_lowercase().contains("robustness") {
+        Some("robustness curves can differ a little between runs".into())
+    } else {
+        None
+    }
+}
+
+/// Every table (an object with `data` rows and a `schema`) by its key path
+fn tables<'a>(value: &'a serde_json::Value, path: String, out: &mut Vec<(String, &'a serde_json::Value)>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.get("data").is_some_and(|d| d.is_array()) && map.contains_key("schema") {
+                out.push((path, value));
+                return;
+            }
+            for (key, v) in map {
+                tables(v, format!("{path}/{key}"), out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (i, v) in items.iter().enumerate() {
+                tables(v, format!("{path}/{i}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn number(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+fn same_value(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    match (number(a), number(b)) {
+        (Some(x), Some(y)) if x.is_nan() || y.is_nan() => x.is_nan() && y.is_nan(),
+        (Some(x), Some(y)) => x == y || (x - y).abs() <= 1e-9_f64.max(1e-6 * x.abs().max(y.abs())),
+        _ => match (a, b) {
+            // cells like { format, type, value }: field by field, so 360.0 and 360 are the same number
+            (serde_json::Value::Object(x), serde_json::Value::Object(y)) => {
+                x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same_value(v, w)))
+            }
+            (serde_json::Value::Array(x), serde_json::Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same_value(v, w)),
+            _ => a == b,
+        },
+    }
+}
+
+fn same_tables(saved: &serde_json::Value, rerun: &serde_json::Value) -> Result<(), String> {
+    let (mut before, mut after) = (Vec::new(), Vec::new());
+    tables(saved, String::new(), &mut before);
+    tables(rerun, String::new(), &mut after);
+    if before.is_empty() {
+        return Err("the analysis has no tables to check the rerun against".into());
+    }
+    let missing = serde_json::Value::String("<missing>".into());
+    for (path, table) in &before {
+        let Some((_, other)) = after.iter().find(|(p, _)| p == path) else {
+            return Err(format!("the rerun has no table {path}"));
+        };
+        let rows = table["data"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let others = other["data"].as_array().map(Vec::as_slice).unwrap_or_default();
+        if rows.len() != others.len() {
+            return Err(format!("{path}: {} rows saved, {} in the rerun", rows.len(), others.len()));
+        }
+        for (i, (row, again)) in rows.iter().zip(others).enumerate() {
+            let (Some(row), Some(again)) = (row.as_object(), again.as_object()) else { continue };
+            for key in row.keys().chain(again.keys()).filter(|k| !k.starts_with('.')) {
+                let (a, b) = (row.get(key).unwrap_or(&missing), again.get(key).unwrap_or(&missing));
+                if !same_value(a, b) {
+                    return Err(format!("{path}: row {} {key}: {a} saved, {b} in the rerun", i + 1));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// JASP's own picture of each plot, from the file (`original`, a data URI, with `originalWidthIn`/`HeightIn` at
@@ -153,6 +286,35 @@ fn base64(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
+    fn table(rows: serde_json::Value) -> serde_json::Value {
+        json!({ "main": { "schema": {}, "data": rows, "title": "T" } })
+    }
+
+    #[test]
+    fn a_rerun_is_trusted_only_when_its_tables_match() {
+        let saved = table(json!([{ "v": "a", "x": 0.30000000000000004, ".isNewGroup": true }]));
+        assert!(super::same_tables(&saved, &table(json!([{ "v": "a", "x": 0.3 }]))).is_ok(), "rounding in the last digits");
+        assert!(super::same_tables(&saved, &table(json!([{ "v": "a", "x": "0.3" }]))).is_ok(), "numbers written as text");
+        assert!(super::same_tables(&saved, &table(json!([{ "v": "a", "x": 0.31 }]))).is_err(), "a different value");
+        assert!(super::same_tables(&saved, &table(json!([{ "v": "b", "x": 0.3 }]))).is_err(), "a different label");
+        assert!(super::same_tables(&saved, &table(json!([]))).is_err(), "missing rows");
+        assert!(super::same_tables(&saved, &json!({})).is_err(), "a missing table");
+        assert!(super::same_tables(&json!({}), &saved).is_err(), "nothing to check against");
+        let cell = table(json!([{ "m": { "format": "dp:3", "value": 360.0 } }]));
+        assert!(super::same_tables(&cell, &table(json!([{ "m": { "format": "dp:3", "value": 360 } }]))).is_ok(), "cells with a format, 360.0 = 360");
+    }
+
+    #[test]
+    fn random_analyses_keep_jasps_picture() {
+        assert!(super::random_parts(&json!({ "name": "mlClassificationDecisionTree", "options": {} }), "tree").is_some());
+        assert!(super::random_parts(&json!({ "name": "ClassicProcess", "options": { "ciMethod": "bootstrap" } }), "path").is_some());
+        assert!(super::random_parts(&json!({ "name": "TTestBayesianIndependentSamples", "options": {} }), "drp_robustnessPlot").is_some());
+        assert!(super::random_parts(&json!({ "name": "TTestBayesianIndependentSamples", "options": {} }), "drp_priorAndPosteriorPlot").is_none());
+        assert!(super::random_parts(&json!({ "name": "Anova", "options": { "bootstrapEstimates": false } }), "descriptivesPlot").is_none());
+    }
+
     #[test]
     fn base64_matches_the_standard() {
         assert_eq!(super::base64(b""), "");

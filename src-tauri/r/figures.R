@@ -30,6 +30,7 @@ pt <- 10; maxw <- 6.5; dpi <- 300; k <- 5 / (530 / 72)   # one scale: a 530 px J
 jaspGraphs::graphOptions(fontsize = pt / k, family = apaFamily, axis.title.cex = 1.1, legend.cex = 1)
 opts <- analysisOptions(jaspFile); if (!is.null(attr(opts, "analysisName"))) opts <- list(opts)
 ds <- readJaspData(jaspFile)
+apaVariables <- colnames(ds)   # title case leaves the data's own names alone
 analyses <- list(); figures <- list(); rerun <- vector("list", length(opts))
 for (i in seq_along(opts)) {
   o <- opts[[i]]; err <- NULL; t0 <- Sys.time()
@@ -43,11 +44,21 @@ for (i in seq_along(opts)) {
     if (w * k > maxw) { h <- h * maxw / (w * k); w <- maxw / k }   # too wide for the page: drawn smaller, same text size
     png <- sprintf("a%d-%s.png", i, gsub("[^A-Za-z0-9_.-]", "_", fig$getUnique))
     q <- NULL
-    drawn <- tryCatch({ q <- apaPlot(fig$obj); ragg::agg_png(file.path(outDir, png), width = w, height = h, units = "in", res = dpi * k)
-      drawJasp(q); dev.off(); TRUE }, error = function(e) { while (dev.cur() > 1) dev.off(); conditionMessage(e) })
-    figures[[length(figures) + 1]] <- rapply(list(analysis = i, name = fig$getUnique, title = fig$title, png = if (isTRUE(drawn)) png else NULL,
-      error = if (isTRUE(drawn)) NULL else drawn, widthIn = w * k, heightIn = h * k, facts = plotFacts(fig$obj),
-      changes = if (is.null(q)) NULL else attr(q, "apaChanges")), decode, classes = "character", how = "replace")
+    drawn <- if (inherits(fig$obj, "jaspGraphsPlot") && dataPanels(fig$obj) > 15) {
+      "too many panels to fit a page with readable text"   # big correlation matrices: JASP's own picture is better
+    } else tryCatch({
+      q <- apaPlot(fig$obj)
+      ragg::agg_png(file.path(outDir, png), width = w, height = h, units = "in", res = dpi * k); drawJasp(q); dev.off()
+      # a picture of one flat colour means nothing was drawn (some plot kinds draw outside ggplot)
+      pixels <- png::readPNG(file.path(outDir, png))
+      if (sd(as.vector(pixels[, , 1:min(3, dim(pixels)[3])])) < 1e-6) "nothing was drawn" else TRUE
+    }, error = function(e) { while (dev.cur() > 1) dev.off(); conditionMessage(e) })
+    # names decoded for the caller (titles, facts), but the picture's file name stays as written
+    entry <- rapply(list(analysis = i, name = fig$getUnique, title = fig$title, error = if (isTRUE(drawn)) NULL else drawn,
+      widthIn = w * k, heightIn = h * k, facts = plotFacts(fig$obj), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
+      decode, classes = "character", how = "replace")
+    entry$png <- if (isTRUE(drawn)) png else NULL
+    figures[[length(figures) + 1]] <- entry
   }
   analyses[[i]] <- list(analysis = i, name = attr(o, "analysisName"), status = if (is.null(res)) "error" else as.character(res$status),
     error = err, seconds = round(as.numeric(Sys.time() - t0, units = "secs"), 1))

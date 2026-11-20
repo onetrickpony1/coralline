@@ -28,4 +28,23 @@ runJasp <- function(o, ds) {
   res
 }
 # The plot as JASP draws it: names decoded everywhere (titles, legends, text in the plot), as a grid object
-drawJasp <- function(p) { d <- jaspBase:::decodeplot(p); if (inherits(d, "grob")) grid::grid.draw(d) else print(d) }
+drawJasp <- function(p) {
+  d <- jaspBase:::decodeplot(p)
+  if (inherits(d, "grob")) grid::grid.draw(d)
+  else if (inherits(d, "qgraph")) plot(d)                     # networks and path diagrams: base graphics
+  else if (inherits(d, "recordedplot")) grDevices::replayPlot(d)
+  else print(d)
+}
+
+# jaspTools turns the data into the types an analysis asks for. A group column (factor) asked for as a scale must
+# give its labels' numbers (JASP's ordinal 1-10 ratings), not R's group codes; everything else as jaspTools does.
+local({
+  original <- get("convertToTypes", envir = asNamespace("jaspTools"))
+  fixed <- function(dataset, types, datasetPathOrObject) {
+    for (i in seq_along(dataset))
+      if (identical(types[i], "scale") && is.factor(dataset[[i]]))
+        dataset[[i]] <- suppressWarnings(as.numeric(as.character(dataset[[i]])))
+    original(dataset, types, datasetPathOrObject)
+  }
+  utils::assignInNamespace("convertToTypes", fixed, ns = "jaspTools")
+})

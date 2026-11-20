@@ -28,11 +28,11 @@ readJaspData <- function(jaspFile) {
       e <- tryCatch(jsonlite::fromJSON(ci$emptyValuesJson[1]), error = function(e) NULL)
       if (is.list(e) && isTRUE(e$custom)) empty <- e$strings
       m[is.na(v) | (v == -1 & !(-1 %in% l$value)) | m %in% empty] <- NA
-      num <- suppressWarnings(as.numeric(m))
-      if (cols$columnType[i] == "scale" || all(is.na(m) | !is.na(num))) {
-        # numbers stay numbers, so analyses that read the column as a scale get the values, not group codes
-        out[[cols$name[i]]] <- num
+      if (cols$columnType[i] == "scale") {
+        out[[cols$name[i]]] <- suppressWarnings(as.numeric(m))
       } else {
+        # nominal and ordinal columns are groups, also when their labels are numbers (engine.R makes an analysis
+        # that reads one as a scale get the numbers, not the group codes)
         # groups keep JASP's own order (Labels.ordering); R would otherwise sort them alphabetically
         out[[cols$name[i]]] <- factor(m, levels = setdiff(if (isTRUE(as.logical(ci$dropLevels[1]))) intersect(unique(txt), m) else unique(txt), empty))
         # JASP's own order; missing-value labels left out, unused groups dropped when the column says so

@@ -1,3 +1,4 @@
+apaVariables <- character()   # the data's column names, set by figures.R: title case leaves them as they are
 # APA 7 touches on a finished JASP plot (ggplot or jaspGraphsPlot), applied after the rerun.
 apaFamily <- "Liberation Sans"
 minorWords <- c("a","an","and","as","at","but","by","for","if","in","nor","of","off","on","or","per","so","the","to","up","via","vs.","vs","yet")
@@ -7,6 +8,8 @@ apaTitleCase <- function(s) {
   for (i in seq_along(w)) {
     x <- w[i]
     if (grepl("[A-Z].*[A-Z]|[0-9_]", x) || grepl("^[a-z]+[A-Z]", x)) next   # acronyms, codes, camelCase names stay
+    if (nchar(gsub("[^A-Za-z]", "", x)) <= 1) next                          # symbols: n and N, z, x mean different things
+    if (gsub("[^A-Za-z]", "", x) %in% apaVariables) next                    # the data's own variable names (hse, drp)
     if (i > 1 && tolower(x) %in% minorWords) { w[i] <- tolower(x); next }
     w[i] <- paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
   }
@@ -19,10 +22,11 @@ apaScales <- function(p) {
     s <- sc[[i]]
     if (!inherits(s, "ScaleContinuous")) next
     sc[[i]] <- local({   # local(): each label function keeps its own scale (loop closures share variables)
-      orig <- s; s <- s$clone(); lab <- s$labels
+      orig <- s; s <- s$clone(); lab <- s$labels; tr <- s$get_transformation()
       # ask the untouched original for its labels: methods on the clone would call this wrapper again
       if (is.character(lab) || is.numeric(lab)) s$labels <- trueMinus(lab)
-      else if (!is.null(lab)) s$labels <- function(b) trueMinus(orig$get_labels(b))
+      # ggplot hands label functions breaks in data space, get_labels wants them transformed (log, reverse axes)
+      else if (!is.null(lab)) s$labels <- function(b) trueMinus(orig$get_labels(tr$transform(b)))
       s
     })
   }
@@ -48,12 +52,14 @@ apaGgplot <- function(p, changes) {
   }
   p
 }
+dataPanels <- function(p) sum(vapply(p$subplots, function(s) inherits(s, "ggplot") &&
+  any(!grepl("Text|Label|Blank|RangeFrame", vapply(s$layers, function(l) class(l$geom)[1], ""))), logical(1)))
 apaPlot <- function(p) {
   changes <- local({ v <- character(); list(add = function(x) v <<- c(v, x), get = function() v) })
   if (inherits(p, "ggplot")) p <- apaGgplot(p, changes)
   else if (inherits(p, "jaspGraphsPlot")) for (i in seq_along(p$subplots)) if (inherits(p$subplots[[i]], "ggplot")) {
     q <- apaGgplot(p$subplots[[i]], changes)
-    p$subplots[[i]] <- if (length(p$subplots) >= 4) thinBreaks(q) else q   # matrix layouts: little room per panel
+    p$subplots[[i]] <- if (dataPanels(p) >= 4) thinBreaks(q) else q   # matrix layouts: little room per panel
   }
   attr(p, "apaChanges") <- changes$get()
   p
@@ -99,31 +105,44 @@ thinBreaks <- function(p) {
   for (a in c("x", "y")) {
     sc <- p$scales$get_scales(a)
     if (is.null(sc) || !inherits(sc, "ScaleContinuous") || !is.numeric(sc$breaks) || length(sc$breaks) <= 5) next
-    # only plain linear axes: log axes (Bayes factors) and fixed labels that aren't numbers keep JASP's ticks
     tr <- tryCatch(sc$get_transformation()$name, error = function(e) "identity")
     if (!identical(tr, "identity") || !(inherits(sc$labels, "waiver") || is.function(sc$labels) || is.character(sc$labels) || is.numeric(sc$labels))) next
-    b <- sc$breaks
-    nb <- scales::breaks_extended(n = 3)(range(b)); nb <- nb[nb >= min(b) & nb <= max(b)]
-    if (length(nb) < 2) next
-    if (is.null(sc$limits)) sc$limits <- range(b)   # the axis keeps its length
-    sc$breaks <- nb
-    # labels written from the new ticks (the old ones, or a wrapper asking the original scale, would not match)
-    sc$labels <- function(b) trueMinus(format(b, trim = TRUE, drop0trailing = TRUE, scientific = FALSE))
+    # keep JASP's own ticks: both ends (the axis line runs between them) and evenly spaced ones in between
+    b <- sc$breaks; n <- length(b)
+    step <- c(3, 2, 4)[((n - 1) %% c(3, 2, 4)) == 0][1]
+    keep <- if (is.na(step)) c(1, n) else seq(1, n, by = step)
+    lab <- sc$labels
+    sc$breaks <- b[keep]
+    if ((is.character(lab) || is.numeric(lab)) && length(lab) == n) sc$labels <- trueMinus(lab[keep])
+    else if (!inherits(lab, "waiver")) sc$labels <- function(x) trueMinus(format(x, trim = TRUE, drop0trailing = TRUE, scientific = FALSE))
   }
   p
 }
+# plotmath ("italic(r) ~ \"=\" ~ \"-0.3\""): true minus only inside the quoted parts, so the label still parses
+quotedMinus <- function(v) vapply(v, function(x) {
+  parts <- strsplit(x, '"', fixed = TRUE)[[1]]
+  inside <- seq_along(parts) %% 2 == 0
+  parts[inside] <- trueMinus(parts[inside])
+  paste0(paste(parts, collapse = '"'), if (endsWith(x, '"')) '"' else "")
+}, "", USE.NAMES = FALSE)
 apaText <- function(p) {
   if (is.data.frame(p$data)) for (col in names(p$data)) if (is.character(p$data[[col]])) p$data[[col]] <- noLeadingZero(p$data[[col]])
   for (i in seq_along(p$layers)) {
     l <- p$layers[[i]]
     if (!grepl("Text|Label", class(l$geom)[1])) next
-    if (is.character(l$aes_params$label)) l$aes_params$label <- noLeadingZero(l$aes_params$label)
-    if (is.data.frame(l$data)) for (col in names(l$data)) if (is.character(l$data[[col]])) l$data[[col]] <- noLeadingZero(l$data[[col]])
+    fix <- function(v) {
+      v <- noLeadingZero(v)
+      if (!is.character(v)) return(v)
+      if (isTRUE(l$geom_params$parse)) quotedMinus(v)
+      else trueMinus(v)
+    }
+    if (is.character(l$aes_params$label)) l$aes_params$label <- fix(l$aes_params$label)
+    if (is.data.frame(l$data)) for (col in names(l$data)) if (is.character(l$data[[col]])) l$data[[col]] <- fix(l$data[[col]])
     # a label mapped to a variable in JASP's own code (aes(label = lab)): evaluate it once and keep the fixed text
     if (!is.null(l$mapping$label) && is.data.frame(l$data) && nrow(l$data) > 0) {
       val <- tryCatch(rlang::eval_tidy(l$mapping$label, l$data), error = function(e) NULL)
       if (is.character(val) && (length(val) == 1 || length(val) == nrow(l$data))) {
-        l$data$.apaLabel <- noLeadingZero(val)
+        l$data$.apaLabel <- fix(val)
         l$mapping$label <- ggplot2::aes(label = .apaLabel)$label
       }
     }
