@@ -571,21 +571,34 @@ main { flex: 1; min-height: 0; display: flex; }
 .paper table { color: #000; }
 .hide-highlights .paper [style*="#ffff00"] { background: transparent !important; }
 .paper .flash { animation: flash 1.2s var(--ease) 2; border-radius: 2px; }
-@keyframes flash { 50% { box-shadow: 0 0 0 4px #ffb400; } }
+@keyframes flash { 50% { box-shadow: 0 0 0 4px var(--todo); } }
 
 .todo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .todo .lead { font-size: 12.5px; color: var(--ink-2); margin-right: 2px; }
 .todo button {
+	/* A glass pill like the other buttons; the app's one yellow (--todo, the sidebar dots) only as a dot and a tint */
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
 	font: 500 12.5px/1 var(--font);
-	padding: 6px 10px;
+	padding: 6px 11px 6px 9px;
 	border-radius: 999px;
 	border: 0;
 	cursor: pointer;
-	background: color-mix(in srgb, var(--todo) 55%, transparent);
-	color: var(--todo-ink);
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--todo-ink) 18%, transparent);
+	color: var(--ink);
+	background: linear-gradient(180deg, var(--sheen), transparent 70%), color-mix(in srgb, var(--todo) 10%, var(--glass));
+	box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px var(--hair);
+	transition: transform 0.12s var(--ease), background-color 0.2s, box-shadow 0.2s;
 }
-.todo button:hover { background: var(--todo); color: #3d3000; }
+.todo button::before {
+	content: "";
+	width: 8px;
+	height: 8px;
+	flex: none;
+	background: radial-gradient(circle closest-side, var(--todo) 0 62%, color-mix(in srgb, var(--todo) 70%, var(--todo-ink)) 72%, transparent 100%);
+}
+.todo button:hover { background: linear-gradient(180deg, var(--sheen), transparent 70%), color-mix(in srgb, var(--todo) 22%, var(--glass)); box-shadow: inset 0 1px 0 var(--edge), inset 0 0 0 1px color-mix(in srgb, var(--todo) 60%, var(--hair)); }
+.todo button:active { transform: scale(0.97); }
 .todo.ready { color: var(--ok); font-size: 13px; font-weight: 550; }
 .card .error { margin: 0 16px 16px; color: var(--danger); }
 
