@@ -1543,6 +1543,74 @@ function _apaStatisticColumn(table) {
 	}
 }
 
+function _apaPostHocPairs(table, title) {
+	// Post hoc comparisons list the two levels in two unheaded columns ("Wine | Water"): one column, "Wine – Water",
+	// headed "Comparison". The first level often spans several rows.
+	if (!/^Post Hoc Comparisons/i.test(title))
+		return;
+	let $table = $(table);
+	let headRows = $table.children("thead").children("tr").toArray();
+	let rows = headRows.concat($table.children("tbody").children("tr").toArray());
+	if (headRows.length === 0 || rows.length === headRows.length)
+		return;
+	let layout = _apaGrid(rows);
+	let headLast = headRows.length - 1;
+	let text = function (r, c) { let cell = layout.grid[r] && layout.grid[r][c]; return cell ? _apaPlain(cell.innerHTML) : ""; };
+	if (text(headLast, 0) !== "" || text(headLast, 1) !== "")
+		return;
+	if (layout.placed.some(function (i) { return i.col < 2 && i.colSpan > 1; }))
+		return;
+	let level = "";
+	for (let r = headRows.length; r < rows.length; r++) {
+		level = text(r, 0) || level;  // JASP leaves a repeated first level blank
+		let cell = document.createElement("td");
+		cell.className = "text";
+		cell.textContent = level + " \u2013 " + text(r, 1);
+		let after = layout.placed.find(function (i) { return i.row === r && i.col > 1 && i.cell.parentNode === rows[r]; });
+		for (let i of layout.placed)
+			if (i.row === r && i.col < 2 && i.cell.parentNode)
+				i.cell.remove();
+		rows[r].insertBefore(cell, after ? after.cell : null);
+	}
+	for (let r = 0; r < headRows.length; r++) {
+		let cells = layout.placed.filter(function (i) { return i.row === r && i.col < 2; });
+		if (cells.length === 2) {
+			cells[1].cell.remove();
+			if (r === headLast)
+				cells[0].cell.textContent = "Comparison";
+		}
+		else if (cells.length === 1 && cells[0].colSpan >= 2)
+			cells[0].cell.colSpan = cells[0].colSpan - 1;
+	}
+}
+
+function _apaConfusionMatrix(table, title) {
+	// Confusion matrices label the rows with "Observed" in a column of its own: it goes, and heads the class column
+	if (!/Confusion Matrix/i.test(title))
+		return;
+	let $table = $(table);
+	let headRows = $table.children("thead").children("tr").toArray();
+	let rows = headRows.concat($table.children("tbody").children("tr").toArray());
+	let layout = _apaGrid(rows);
+	let headLast = headRows.length - 1;
+	if (headLast < 0)
+		return;
+	let column = layout.placed.filter(function (i) { return i.col === 0; });
+	let body = column.filter(function (i) { return i.row > headLast; }).map(function (i) { return _apaPlain(i.cell.innerHTML); });
+	let head = layout.grid[headLast][1];
+	if (!body.some(function (v) { return v === "Observed"; }) || !body.every(function (v) { return v === "Observed" || v === ""; }))
+		return;
+	if (column.some(function (i) { return i.colSpan > 1 && (i.row >= headLast || _apaPlain(i.cell.innerHTML) !== ""); }) || !head || _apaPlain(head.innerHTML) !== "")
+		return;
+	column.forEach(function (i) {
+		if (i.colSpan > 1)
+			i.cell.colSpan = i.colSpan - 1;  // an empty heading above spans into the class column
+		else if (i.cell.parentNode)
+			i.cell.remove();
+	});
+	head.textContent = "Observed";
+}
+
 function _apaMergePairColumns(table) {
 	// JASP shows pairs and paths over several columns: "Revise | - | Exam", "Framing | → | Justification",
 	// "Visual | ↔ | Textual", sometimes after a label column ("Total | Age | → | Fatigue"). In an APA table a pair is
@@ -1734,7 +1802,7 @@ function _apaCorrelationLabelColumn(table) {
 	for (let c = 1; c < columns; c++) {
 		let body = layout.placed.filter(function (item) { return item.row >= headCount && item.col === c; });
 		let labels = body.map(function (item) { return _apaLabel(item.cell); }).filter(function (label) { return label !== ""; });
-		if (labels.length === 0 || !labels.every(function (label) { return /^(Pearson's r|Spearman's rho|Kendall's [Tt]au[ -]?[Bb]?|r|rho|tau|p(-value)?|N|n|(Lower|Upper) \d+% CI|Effect size.*|Fisher's z|SE effect size)$/.test(label); }))
+		if (labels.length === 0 || !labels.every(function (label) { return /^(Pearson's r|Spearman's rho|Kendall's [Tt]au[ -]?[Bb]?|r|rho|tau|p(-value)?|N|n|(Lower|Upper) \d+% (CI|Credible Interval)|Effect size.*|Fisher's z|SE effect size|BF.*|log\s*\(BF.*)$/.test(label); }))
 			continue;
 		let column = layout.placed.filter(function (item) { return item.col <= c && c < item.col + item.colSpan; });
 		if (column.some(function (item) { return item.colSpan > 1 || item.col !== c; }))
@@ -1893,7 +1961,9 @@ function buildAPATable(tableElement, info, tableNumber) {
 	$table.children("tfoot").remove();
 	$table.find("div.over-title-space").each(function () { $(this).replaceWith(this.childNodes); });
 
-	let turned = /^Descriptive Statistics/i.test(_apaPlain(info.title)) ? _apaTransposeDescriptives(table) : { turned: false };
+	let turned = /^(Descriptive Statistics|Circular Descriptives)/i.test(_apaPlain(info.title)) ? _apaTransposeDescriptives(table) : { turned: false };
+	_apaPostHocPairs(table, _apaPlain(info.title));
+	_apaConfusionMatrix(table, _apaPlain(info.title));
 	_apaMergePairColumns(table);
 	_apaDropEmptyColumns(table);
 	_apaStatisticColumn(table);
@@ -2005,14 +2075,29 @@ function buildAPATable(tableElement, info, tableNumber) {
 			// A heading APA would use, from what the column holds; "Variable" is APA's default for the first column
 			let labels = layout.placed.filter(function (item) { return item.row >= headRows.length && item.col === c; }).map(function (item) { return _apaLabel(item.cell); }).filter(function (l) { return l !== ""; });
 			let heading = null;
-			if (labels.some(function (l) { return /^\(Intercept\)$/.test(l); }))
+			let all = function (re) { return labels.length > 0 && labels.every(function (l) { return re.test(l); }); };
+			if (labels.some(function (l) { return /^\(?Intercept\)?$/.test(l); }))
 				heading = "Predictor";
+			else if (all(/^H([\d\u2080-\u2089]+|u|c)?(\s*\(.*\))?$/))
+				heading = "Hypothesis";
+			else if (all(/^Factor \d+$/))
+				heading = "Factor";
+			else if (all(/^Component \d+$/))
+				heading = "Component";
+			else if (all(/ \u2192 /))
+				heading = "Path";
+			else if (all(/^(Total( indirect)?|Direct|Indirect)( effects?)?$/i))
+				heading = "Effect";
+			else if (all(/^(Pooled effect|\u{1D70F}\u00B2?|\u03C4\u00B2?|I\u00B2|H\u00B2)$/u) && labels.some(function (l) { return l === "Pooled effect"; }))
+				heading = "Parameter";
 			else if (labels.some(function (l) { return /^(Residuals?|Within|Error)$/.test(l); }))
 				heading = "Source";
-			else if (labels.every(function (l) { return /^(Model\s*\d+|M[\d₀-₉]+)$/.test(l); }))
+			else if (labels.every(function (l) { return /^(Model(\s*\d+)?|M[\d₀-₉]+)$/.test(l); }))
 				heading = "Model";
-			else if (/\bTests\b/.test(_apaPlain(info.title)) && c === 0)
+			else if (/\bTests\b/.test(_apaPlain(info.title)) && (c === 0 || labels.some(function (l) { return /^χ²/.test(l); })))
 				heading = "Test";
+			else if (/^Test of Sphericity/i.test(_apaPlain(info.title)) && c === 0)
+				heading = "Effect";
 			else if (c === 0 && _apaAreVariables(labels, info.variableNames))
 				heading = "Variable";  // only when the caller knows the analysis's variables and these are them
 			if (heading) {
