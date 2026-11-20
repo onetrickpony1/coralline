@@ -185,6 +185,50 @@
 		return node;
 	}
 
+	// Showing and hiding with a short animation. Showing plays the CSS "enter" animation; hiding plays "leaving"
+	// and sets hidden when it ends (at once with Reduce effects). Showing again cancels a hide still running.
+	function reveal(node) {
+		node.leaveRun = (node.leaveRun || 0) + 1;
+		node.classList.remove("leaving");
+		if (node.hidden) {
+			node.hidden = false;
+			replay(node, "enter");
+		}
+	}
+	function conceal(node, done) {
+		if (node.hidden || node.classList.contains("leaving")) {
+			if (done) done();
+			return;
+		}
+		if (state.reduced) {
+			node.hidden = true;
+			if (done) done();
+			return;
+		}
+		const run = node.leaveRun = (node.leaveRun || 0) + 1;
+		node.classList.add("leaving");
+		const finish = function () {
+			if (node.leaveRun !== run)
+				return;
+			node.leaveRun++;
+			node.classList.remove("leaving");
+			node.hidden = true;
+			if (done) done();
+		};
+		node.addEventListener("animationend", function (e) { if (e.target === node) finish(); }, { once: true });
+		setTimeout(finish, 240);  // if no animation runs
+	}
+	function isShown(node) { return !node.hidden && !node.classList.contains("leaving"); }
+	// Plays a one-off animation class again, even if it is already set
+	function replay(node, cls) {
+		if (state.reduced)
+			return;
+		node.classList.remove(cls);
+		void node.offsetWidth;
+		node.classList.add(cls);
+		node.addEventListener("animationend", function (e) { if (e.target === node) node.classList.remove(cls); }, { once: true });
+	}
+
 	function svgIcon(paths) {
 		const ns = "http://www.w3.org/2000/svg";
 		const svg = document.createElementNS(ns, "svg");
@@ -288,7 +332,7 @@
 		const openPanels = new Set();
 		for (const group of state.groups || [])
 			for (const item of group.items)
-				if (item.changesPanel && !item.changesPanel.hidden)
+				if (item.changesPanel && isShown(item.changesPanel))
 					openPanels.add(item.key);
 
 		const all = build(state.file);
@@ -408,7 +452,11 @@
 		}
 		else
 			hint.textContent = "";
+		const wasHidden = hint.hidden;
 		hint.hidden = hint.textContent === "";
+		if (!hint.hidden && (wasHidden || hint.dataset.said !== hint.textContent))
+			replay(hint, "enter");
+		hint.dataset.said = hint.textContent;
 		hint.classList.toggle("warn", stale.length > 0);
 		$id("progress").classList.toggle("unfinished", yellow > 0 || stale.length > 0);
 		const circumference = 113.1;
@@ -472,6 +520,8 @@
 		state.current = item.id;
 		render();
 		const now = itemById(item.id);
+		if (now && now.card)
+			replay(now.card, "settle");
 		const stale = staleCount();
 		toast((left ? "Left out of your report. The tables after it are renumbered." : "Back in your report as Table " + (now ? now.number : "") + ".")
 			+ (stale > 0 ? " " + plural(stale, "copied table has", "copied tables have") + " a new number: copy " + (stale === 1 ? "it" : "them") + " again." : ""));
@@ -509,15 +559,18 @@
 		const cardMenu = el("div", { class: "card-menu glass", role: "group", "aria-label": "More for " + numberText }, [textItem, leaveItem]);
 		cardMenu.hidden = true;
 		const toggleCardMenu = function (open) {
-			cardMenu.hidden = !open;
+			if (open)
+				reveal(cardMenu);
+			else
+				conceal(cardMenu);
 			moreButton.setAttribute("aria-expanded", String(open));
 			if (open)
 				textItem.focus();
 		};
-		moreButton.addEventListener("click", function () { toggleCardMenu(cardMenu.hidden); });
+		moreButton.addEventListener("click", function () { toggleCardMenu(!isShown(cardMenu)); });
 		cardMenu.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.stopPropagation(); toggleCardMenu(false); moreButton.focus(); } });
 		cardMenu.addEventListener("focusout", function (e) { if (!cardMenu.contains(e.relatedTarget) && e.relatedTarget !== moreButton) toggleCardMenu(false); });
-		document.addEventListener("pointerdown", function (e) { if (!cardMenu.hidden && !cardMenu.contains(e.target) && e.target.closest(".card-more") !== moreButton) toggleCardMenu(false); });
+		document.addEventListener("pointerdown", function (e) { if (isShown(cardMenu) && !cardMenu.contains(e.target) && e.target.closest(".card-more") !== moreButton) toggleCardMenu(false); });
 		textItem.addEventListener("click", function () { toggleCardMenu(false); copyItem(item, true); });
 		leaveItem.addEventListener("click", function () { toggleCardMenu(false); setLeftOut(item, true); });
 		head.appendChild(el("div", { class: "actions" }, [changesButton, el("div", { class: "card-more-wrap" }, [moreButton, cardMenu]), button]));
@@ -540,13 +593,17 @@
 					for (const other of chips.querySelectorAll("button"))
 						other.setAttribute("aria-expanded", "false");
 					chip.setAttribute("aria-expanded", String(open));
-					hint.hidden = !open;
 					if (open) {
 						hint.textContent = "";
 						for (const part of todoHelp(kind, thing, item))
 							hint.appendChild(part);
+						if (isShown(hint))
+							replay(hint, "swap-in");  // another chip's help: the text crossfades
+						reveal(hint);
 						flashHighlight(item, kind);
 					}
+					else
+						conceal(hint);
 				});
 				chips.appendChild(chip);
 			}
@@ -695,10 +752,13 @@
 		if (!item || !item.changesPanel)
 			return;
 		const panel = item.changesPanel;
-		const show = open === undefined ? panel.hidden : open;
+		const show = open === undefined ? !isShown(panel) : open;
 		if (show && panel.childElementCount === 0)
 			fillChanges(panel, item.apa.changes || [], item);
-		panel.hidden = !show;
+		if (show)
+			reveal(panel);
+		else
+			conceal(panel);
 		item.changesButton.setAttribute("aria-expanded", String(show));
 		item.changesButton.classList.toggle("on", show);
 		if (show && fromKeyboard)
@@ -737,8 +797,11 @@
 			const body = el("div", { class: "rule-body" }, [el("p", { class: "why", text: change.detail })]);
 			body.hidden = true;
 			toggle.addEventListener("click", function () {
-				const open = body.hidden;
-				body.hidden = !open;
+				const open = !isShown(body);
+				if (open)
+					reveal(body);
+				else
+					conceal(body);
 				toggle.setAttribute("aria-expanded", String(open));
 			});
 			if (change.examples.length > 0) {
@@ -764,7 +827,11 @@
 					const more = el("button", { type: "button", class: "more", "aria-expanded": "false", text: "Show " + extra + " more" });
 					more.addEventListener("click", function () {
 						const open = more.getAttribute("aria-expanded") !== "true";
-						Array.from(pairs.children).forEach(function (row, i) { row.hidden = !open && i >= 6; });
+						Array.from(pairs.children).forEach(function (row, i) {
+							if (i < 6) return;
+							if (open) reveal(row);
+							else row.hidden = true;  // rows go at once, so the list doesn't jump twice
+						});
 						more.setAttribute("aria-expanded", String(open));
 						more.textContent = open ? "Show less" : "Show " + extra + " more";
 						if (!open && more.getBoundingClientRect().top < 0)
@@ -837,6 +904,10 @@
 					: (item.title + " " + item.rawTitle + " " + group.title).toLowerCase().indexOf(query) !== -1
 					|| (query.length >= 3 && item.apa && searchText(item, group).indexOf(query) !== -1));
 				const matches = inFilter && inQuery;
+				if (matches && item.card.hidden) {
+					replay(item.card, "enter");
+					replay(item.link, "enter");
+				}
 				item.card.hidden = !matches;
 				item.link.hidden = !matches;
 				if (matches)
@@ -1050,6 +1121,7 @@
 		state.copied.set(item.key, { n: item.number, h: contentHash(item) });
 		saveCopied();
 		updateMark(item);
+		replay(item.link.querySelector(".mark"), "pop-in");
 		updateCardState(item);
 		updateProgress();
 		// In the "To copy" view, a copied table leaves the list once the button has said "Copied"
@@ -1376,8 +1448,11 @@
 	const menu = $id("menu");
 	const menuButton = $id("menuButton");
 	function toggleMenu(open) {
-		const on = open === undefined ? menu.hidden : open;
-		menu.hidden = !on;
+		const on = open === undefined ? !isShown(menu) : open;
+		if (on)
+			reveal(menu);
+		else
+			conceal(menu);
 		menuButton.setAttribute("aria-expanded", String(on));
 		if (on) {
 			updateMenu();
@@ -1425,7 +1500,7 @@
 			toggleMenu(false);
 	});
 	document.addEventListener("click", function (e) {
-		if (!menu.hidden && !menu.contains(e.target))
+		if (isShown(menu) && !menu.contains(e.target))
 			toggleMenu(false);
 	});
 	menu.addEventListener("click", function (e) {
@@ -1508,7 +1583,7 @@
 			return;
 		}
 		if (key === "Escape") {
-			if (!menu.hidden) { toggleMenu(false); menuButton.focus(); return; }
+			if (isShown(menu)) { toggleMenu(false); menuButton.focus(); return; }
 			if (isNarrow() && $id("layout").classList.contains("drawer-open")) { setDrawer(false); return; }
 			if (state.query) { clearSearch(); search.blur(); return; }
 			if (typing) e.target.blur();

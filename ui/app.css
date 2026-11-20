@@ -326,7 +326,6 @@ body {
 	-webkit-backdrop-filter: blur(40px) saturate(160%);
 	backdrop-filter: blur(40px) saturate(160%);
 	transform-origin: top right;
-	animation: pop 0.16s var(--ease);
 }
 @keyframes pop { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
 .menu > button {
@@ -876,3 +875,37 @@ body.dragging .dropping { opacity: 1; }
 .changes .rule-body { padding: 0 8px 8px 23px; }
 .changes .lead:focus { outline: none; }
 .hide-changes { margin-top: 10px; }
+
+/* ---- Motion: things that appear rise in, things that go sink out (all off with Reduce effects) ---- */
+@keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes sink { to { opacity: 0; transform: translateY(-4px); } }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-6px) scale(0.97); filter: blur(2px); } }
+@keyframes drop-out { to { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes pop-in { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.18); opacity: 1; } 100% { transform: none; } }
+@keyframes settle { from { opacity: 0.4; transform: scale(0.985); } }
+@keyframes swap-in { from { opacity: 0.2; } }
+
+/* Menus drop from their button */
+.menu.enter, .card-menu.enter { animation: drop-in 0.2s var(--ease); }
+.menu.leaving, .card-menu.leaving { animation: drop-out 0.14s ease-in both; pointer-events: none; }
+.card-menu { transform-origin: top right; }
+
+/* Help under the to-dos, What changed, its rules and extra rows */
+.todo-hint.enter, .changes.enter, .rule-body.enter, .pairs li.enter { animation: rise 0.22s var(--ease); }
+.todo-hint.leaving, .changes.leaving, .rule-body.leaving { animation: sink 0.15s ease-in both; }
+.todo-hint.swap-in > * { animation: swap-in 0.25s var(--ease); }
+
+/* Tables coming back after a filter or search, the list's links, a table left out or put back */
+.card.enter, .side-list a.enter { animation: rise 0.24s var(--ease); }
+.card.settle { animation: settle 0.35s var(--ease); }
+
+/* A new tick in the list */
+.side-list a .mark.pop-in svg { animation: pop-in 0.38s var(--ease); }
+
+/* New text under the ring, notes on cards, the title-bar count, the clear button, no-match, start and file screens */
+.ready-hint.enter, .stale-note, .dup-note, .no-match { animation: rise 0.25s var(--ease); }
+.bar-progress:not([hidden]) { animation: drop-in 0.24s var(--ease); }
+.search-clear:not([hidden]) { animation: pop-in 0.25s var(--ease); }
+#layout:not([hidden]), #empty:not([hidden]) { animation: fade-in 0.3s ease-out; }
+.recent:not([hidden]) { animation: rise 0.3s var(--ease) 0.05s both; }

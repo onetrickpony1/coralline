@@ -42,6 +42,7 @@
 - **Single-key shortcuts can be turned off** in the menu, for screen readers. Tab leaves the menu closed behind it, and <kbd>W</kbd> moves the focus into What changed.
 - **The reload button shows whether the file is watched**: a green dot when JASP's saves reload the tables, an empty one when not.
 - In the To copy view, a copied table leaves the list after a moment. Messages appear in the bottom right, away from what you're reading.
+- **Gentle motion throughout.** Menus drop from their buttons and fold away, to-do help, What changed and its rules rise in and sink out, switching to-dos crossfades the help, tables fade back in after a search or filter, a new tick pops into the list, and the start screen and file view fade in. Reduce effects turns it all off.
 - **A Mac installer download** (`jAPAsp-install-mac.zip`) next to the Windows one.
 
 ### Fixes
