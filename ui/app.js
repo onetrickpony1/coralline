@@ -1387,6 +1387,38 @@
 		}
 	}
 	menuButton.addEventListener("click", function (e) { e.stopPropagation(); toggleMenu(); });
+
+	// The shortcuts window rises in (CSS) and sinks out: closing waits for the animation, then closes the dialog
+	const keysDialog = $id("keys");
+	function openKeys() {
+		if (keysDialog.open)
+			return;
+		keysDialog.classList.remove("closing");
+		keysDialog.showModal();
+	}
+	function closeKeys() {
+		if (!keysDialog.open || keysDialog.classList.contains("closing"))
+			return;
+		if (state.reduced) {
+			keysDialog.close();
+			return;
+		}
+		keysDialog.classList.add("closing");
+		let done = false;
+		const finish = function () {
+			if (done)
+				return;
+			done = true;
+			keysDialog.classList.remove("closing");
+			keysDialog.close();
+		};
+		keysDialog.addEventListener("animationend", finish, { once: true });
+		setTimeout(finish, 260);  // in case no animation runs
+	}
+	keysDialog.addEventListener("cancel", function (e) { e.preventDefault(); closeKeys(); });  // Esc
+	keysDialog.querySelector("form").addEventListener("submit", function (e) { e.preventDefault(); closeKeys(); });
+	// A click on the dimmed backdrop closes it too
+	keysDialog.addEventListener("click", function (e) { if (e.target === keysDialog) { const r = keysDialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeKeys(); } });
 	// Tabbing out of the menu closes it, so it never stays open behind the focus
 	menu.addEventListener("focusout", function (e) {
 		if (e.relatedTarget && !menu.contains(e.relatedTarget) && e.relatedTarget !== menuButton)
@@ -1405,7 +1437,7 @@
 		else if (name === "copy-all-text") { copyAll(true); toggleMenu(false); }
 		else if (name === "zoom-in") setZoom(state.zoom + 0.1);
 		else if (name === "zoom-out") setZoom(state.zoom - 0.1);
-		else if (name === "shortcuts") { toggleMenu(false); $id("keys").showModal(); }
+		else if (name === "shortcuts") { toggleMenu(false); openKeys(); }
 		else if (name === "close-file") { toggleMenu(false); closeFile(); }
 		else if (name === "feedback") { toggleMenu(false); openFeedback(); }
 		else if (name === "credit") { toggleMenu(false); openLink(links.profile); }
@@ -1486,7 +1518,7 @@
 		if (mod && (key === "-" || key === "_")) { e.preventDefault(); setZoom(state.zoom - 0.1); return; }
 		if (mod && key === "0") { e.preventDefault(); setZoom(1); return; }
 		// F1 works on every keyboard and even while typing; "?" (Shift and /) stays for those used to it
-		if (key === "F1" || (key === "?" && !typing && !mod && state.singleKeys)) { e.preventDefault(); $id("keys").showModal(); return; }
+		if (key === "F1" || (key === "?" && !typing && !mod && state.singleKeys)) { e.preventDefault(); openKeys(); return; }
 		if (typing || mod || e.altKey || !state.file || !state.singleKeys)
 			return;
 		if (key === "/") { e.preventDefault(); search.focus(); }

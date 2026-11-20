@@ -700,6 +700,15 @@ body.dragging .dropping { opacity: 1; }
 	width: min(440px, calc(100% - 32px));
 }
 .keys::backdrop { background: rgba(10, 14, 30, 0.25); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+/* Opening: rises a little and grows out of a soft blur; closing plays it back faster */
+.keys[open] { animation: keys-in 0.28s var(--ease) both; }
+.keys[open]::backdrop { animation: keys-fade 0.28s ease-out both; }
+.keys.closing { animation: keys-out 0.18s ease-in both; }
+.keys.closing::backdrop { animation: keys-fade 0.18s ease-in reverse both; }
+@keyframes keys-in { from { opacity: 0; transform: translateY(12px) scale(0.96); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes keys-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@keyframes keys-fade { from { opacity: 0; } to { opacity: 1; } }
+.reduced .keys[open], .reduced .keys[open]::backdrop { animation: none; }
 .keys h2 { margin: 0 0 14px; font-size: 18px; letter-spacing: -0.01em; }
 .keys dl { display: grid; grid-template-columns: auto 1fr; gap: 9px 16px; margin: 0 0 18px; align-items: center; }
 .keys dt { display: flex; gap: 4px; justify-content: flex-end; }
