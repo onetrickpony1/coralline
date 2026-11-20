@@ -1178,23 +1178,26 @@ function apaRenderTable(model) {
 	 * and large numbers are written out in full instead of as exponents.
 	 * @returns a <table> element, laid out exactly as JASP draws it
 	 */
-	let saved = { decimals: window.globSet.decimals, pExact: window.globSet.pExact, exponentAbove: window.globSet.exponentAbove };
-	let render = function (decimals) {
+	let saved = { decimals: window.globSet.decimals, pExact: window.globSet.pExact, exponentAbove: window.globSet.exponentAbove, smallExponents: window.globSet.smallExponents };
+	let render = function (decimals, smallExponents) {
 		window.globSet.decimals = String(decimals);
 		window.globSet.pExact = false;
 		window.globSet.exponentAbove = Infinity;  // APA writes large numbers out in full
+		window.globSet.smallExponents = !!smallExponents;  // and small ones in its decimals (-0.001), not as 8.72×10⁻⁴
 		let view = new JASPWidgets.tablePrimitive({ model: model });
 		view.render();
 		return view.$el.find("table").get(0);
 	};
-	let two, three;
+	let two, three, bayes;
 	try {
 		two = render(2);
 		three = render(3);
+		bayes = render(2, true);  // Bayes factors stay in scientific notation: 2.76×10⁻⁴³ would round to 0.00
 	} finally {
 		window.globSet.decimals = saved.decimals;
 		window.globSet.pExact = saved.pExact;
 		window.globSet.exponentAbove = saved.exponentAbove;
+		window.globSet.smallExponents = saved.smallExponents;
 	}
 
 	let rowsOf = function (table) { return $(table).children("thead, tbody").children("tr").toArray(); };
@@ -1229,6 +1232,23 @@ function apaRenderTable(model) {
 		if (isPCell(item) || (needsThree[item.col] && item.cell.tagName === other.tagName))
 			item.cell.innerHTML = other.innerHTML;
 	}
+	// Bayes factor columns (BF₁₀, BF₀₁, log(BF), Error %) and rows keep JASP's scientific notation for extreme values
+	let gridBayes = _apaGrid(rowsOf(bayes));
+	let isBayesLabel = function (cell) { return !!cell && /^(BF|log\s*\(BF|Error\s*%|P\(M\|data\))/.test(_apaLabel(cell)); };
+	for (let item of gridTwo.placed) {
+		if (item.row <= headLast)
+			continue;
+		let bayesColumn = headLast >= 0 && isBayesLabel(gridTwo.grid[headLast][item.col]);
+		let other = gridBayes.grid[item.row] && gridBayes.grid[item.row][item.col];
+		let atThree = gridThree.grid[item.row] && gridThree.grid[item.row][item.col];
+		let lostAtThree = !atThree || /^[-\u2212]?0[.,]000$/.test(_apaPlain(atThree.innerHTML));  // 3 decimals would show 0.000
+		if (bayesColumn && other && /×10/.test(_apaPlain(other.innerHTML)) && (lostAtThree || Math.abs(parseFloat(_apaPlain(other.innerHTML))) >= 1 && /×10<sup>\+|×10\+|×10⁺/.test(other.innerHTML)))
+			item.cell.innerHTML = other.innerHTML;
+	}
+	// A value that rounds to zero isn't negative: "-0.00" -> "0.00"
+	for (let item of gridTwo.placed)
+		if (item.row > headLast)
+			_apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*)[-\u2212](0[.,]0+)(\s*)$/, "$1$2$3"); });
 	return two;
 }
 
@@ -1292,7 +1312,7 @@ function apaTidyLabel(text, isFirst) {
 	 * in `unclear` so they can be highlighted.
 	 */
 	// Pairs and paths ("Revise – Exam", "Framing → Justification"): each side is a name of its own
-	let pair = text.split(/( \u2013 | \u2192 )/);
+	let pair = text.split(/( [\u2013\u2192\u2194\u2b64\u2aeb|\u2223] )/);
 	if (pair.length > 1) {
 		let parts = pair.map(function (part, i) { return i % 2 === 1 ? { text: part, unclear: [] } : apaTidyLabel(part, i === 0 ? isFirst : true); });
 		return { text: parts.map(function (p) { return p.text; }).join(""), unclear: [].concat(...parts.map(function (p) { return p.unclear; })) };
@@ -1524,9 +1544,10 @@ function _apaStatisticColumn(table) {
 }
 
 function _apaMergePairColumns(table) {
-	// JASP shows pairs and paths over three columns without headings: "Revise | - | Exam", "Framing | → | Justification".
-	// APA wants every column headed, and the pair is one entry: it becomes one stub column, "Revise – Exam" under
-	// "Variables", "Framing → Justification" under "Path". Returns true when it merged.
+	// JASP shows pairs and paths over several columns: "Revise | - | Exam", "Framing | → | Justification",
+	// "Visual | ↔ | Textual", sometimes after a label column ("Total | Age | → | Fatigue"). In an APA table a pair is
+	// one entry: the columns become one, "Revise – Exam" under "Variables", "Framing → Justification" under "Path".
+	// Returns true when it merged.
 	let $table = $(table);
 	let headRows = $table.children("thead").children("tr").toArray();
 	let bodyRows = $table.children("tbody").children("tr").toArray();
@@ -1535,69 +1556,123 @@ function _apaMergePairColumns(table) {
 	let rows = headRows.concat(bodyRows);
 	let layout = _apaGrid(rows);
 	let headLast = headRows.length - 1;
-	let text = function (r, c) { let cell = layout.grid[r] && layout.grid[r][c]; return cell ? _apaPlain(cell.innerHTML) : ""; };
-	if (text(headLast, 0) !== "" || text(headLast, 1) !== "" || text(headLast, 2) !== "")
-		return false;
-	let separators = [];
-	for (let r = headRows.length; r < rows.length; r++)
-		separators.push(text(r, 1));
-	let arrow = separators.every(function (s) { return s === "→"; });
-	let dash = separators.every(function (s) { return /^[-–−]$/.test(s); });
-	if (!arrow && !dash)
-		return false;
-	// Longer paths go on: "A → B → C" uses two more unheaded columns per step, empty on shorter rows
 	let width = Math.max(0, ...layout.grid.map(function (row) { return row.length; }));
-	let last = 2;
-	while (arrow && last + 2 < width && text(headLast, last + 1) === "" && text(headLast, last + 2) === "") {
-		let step = true;
-		for (let r = headRows.length; r < rows.length; r++)
-			if (!/^(→)?$/.test(text(r, last + 1)) || (text(r, last + 1) === "") !== (text(r, last + 2) === ""))
-				step = false;
-		if (!step)
-			break;
-		last += 2;
+	let text = function (r, c) { let cell = layout.grid[r] && layout.grid[r][c]; return cell ? _apaPlain(cell.innerHTML) : ""; };
+	let isSeparator = /^[-–−→↔⭤⫫]$/;
+	let separatorColumn = function (c) {
+		if (text(headLast, c) !== "")
+			return null;
+		let found = null;
+		for (let r = headRows.length; r < rows.length; r++) {
+			let value = text(r, c);
+			if (value === "")
+				continue;
+			if (!isSeparator.test(value) || (found !== null && value !== found))
+				return null;
+			found = value;
+		}
+		return found;
+	};
+
+	let sepCol = -1, sep = null;
+	for (let c = 1; c + 1 < width && sepCol === -1; c++) {
+		sep = separatorColumn(c);
+		if (sep !== null)
+			sepCol = c;
 	}
-	let span = last + 1;
-	// The three columns must be plain in the body: no cell reaching past them sideways
-	let touches = layout.placed.filter(function (item) { return item.col < span; });
-	if (touches.some(function (item) { return item.row >= headRows.length && (item.colSpan > 1 || item.col + item.colSpan > span); }))
+	if (sepCol === -1)
+		return false;
+	let first = sepCol - 1;
+	let last = sepCol + 1;
+	// Longer paths: more separator and name columns, empty on shorter rows
+	while (last + 2 < width && separatorColumn(last + 1) === sep && text(headLast, last + 2) === "")
+		last += 2;
+	// A conditioning set after a bar: "Age ⫫ Mood | Memory"
+	let given = -1;
+	if (last + 2 < width && text(headLast, last + 1) === "" && text(headLast, last + 2) === "") {
+		let bars = true;
+		for (let r = headRows.length; r < rows.length; r++)
+			if (!/^[|\u2223]?$/.test(text(r, last + 1)) || (text(r, last + 1) === "") !== (text(r, last + 2) === ""))
+				bars = false;
+		if (bars) {
+			given = last + 2;
+			last += 2;
+		}
+	}
+	// Every body cell in the merged columns must be its own (no sideways spans)
+	if (layout.placed.some(function (item) { return item.row >= headRows.length && item.col <= last && item.col + item.colSpan - 1 >= first && (item.colSpan > 1 || item.col < first); }))
 		return false;
 
-	// Body: one cell per row with the whole pair, written out on every row
+	let joiner = /^[-–−]$/.test(sep) ? " – " : " " + sep + " ";
+	let namesHeading = [];
+	for (let c = first; c <= (given === -1 ? last : given - 2); c += 2)
+		if (text(headLast, c) !== "")
+			namesHeading.push(text(headLast, c));
+	let heading;
+	if (namesHeading.length === 0)
+		heading = sep === "→" ? "Path" : "Variables";
+	else if (namesHeading.every(function (h) { return /^Measure \d+$/.test(h); }))
+		heading = "Measures";
+	else
+		heading = namesHeading.join(joiner);
+
+	// Body: one cell per row with the whole pair or path
 	for (let r = headRows.length; r < rows.length; r++) {
-		let cell = document.createElement("td");
-		cell.className = "text";
 		let names = [];
-		for (let c = 0; c <= last; c += 2)
+		for (let c = first; c <= (given === -1 ? last : given - 2); c += 2)
 			if (text(r, c) !== "")
 				names.push(text(r, c));
-		cell.textContent = names.join(arrow ? " → " : " – ");
-		for (let c = 0; c < span; c++) {
-			let old = layout.grid[r][c];
-			if (old && old.parentNode)
-				old.remove();
-		}
-		rows[r].insertBefore(cell, rows[r].firstChild);
+		let cell = document.createElement("td");
+		cell.className = "text";
+		cell.textContent = names.join(joiner) + (given !== -1 && text(r, given) !== "" ? " " + text(r, given - 1) + " " + text(r, given) : "");
+		let after = layout.placed.find(function (item) { return item.row === r && item.col > last && item.cell.parentNode === rows[r]; });
+		for (let item of layout.placed)
+			if (item.row === r && item.col >= first && item.col <= last && item.cell.parentNode)
+				item.cell.remove();
+		rows[r].insertBefore(cell, after ? after.cell : null);
 	}
-	// Headings: the bottom row gets the stub heading; cells above lose the two columns
+	// Headings: cells over the merged columns shrink to one column
 	for (let r = 0; r < headRows.length; r++) {
-		let seen = [];
-		for (let c = 0; c < span; c++) {
-			let cell = layout.grid[r][c];
-			if (!cell || seen.indexOf(cell) !== -1)
-				continue;
-			seen.push(cell);
-			let inside = Math.min(span, layout.placed.find(function (i) { return i.cell === cell; }).col + cell.colSpan) - Math.max(0, layout.placed.find(function (i) { return i.cell === cell; }).col);
-			if (cell.colSpan > inside)
-				cell.colSpan = cell.colSpan - inside + (c === 0 ? 1 : 0);
-			else if (c > 0 || seen.length > 1)
-				cell.remove();
+		let kept = null;
+		for (let item of layout.placed.filter(function (i) { return i.row === r && i.col <= last && i.col + i.colSpan - 1 >= first; })) {
+			let overlap = Math.min(last, item.col + item.colSpan - 1) - Math.max(first, item.col) + 1;
+			let coversFirst = item.col <= first;
+			if (kept === null && (coversFirst || item.col + item.colSpan - 1 >= first)) {
+				kept = item;
+				item.cell.colSpan = item.colSpan - overlap + 1;
+			}
+			else if (item.colSpan > overlap)
+				item.cell.colSpan = item.colSpan - overlap;
+			else
+				item.cell.remove();
 		}
-		let first = layout.grid[r][0];
-		if (first && first.parentNode && r === headLast)
-			first.textContent = arrow ? "Path" : "Variables";
+		if (r === headLast && kept)
+			kept.cell.textContent = heading;
 	}
 	return true;
+}
+
+function _apaDropEmptyColumns(table) {
+	// APA tables have no empty columns: a column with nothing in its body goes (an operator column JASP leaves
+	// blank, F and p columns with no tests in them)
+	let $table = $(table);
+	let headRows = $table.children("thead").children("tr").toArray();
+	let bodyRows = $table.children("tbody").children("tr").toArray();
+	if (bodyRows.length === 0)
+		return;
+	let layout = _apaGrid(headRows.concat(bodyRows));
+	let width = Math.max(0, ...layout.grid.map(function (row) { return row.length; }));
+	for (let c = width - 1; c >= 0; c--) {
+		let body = layout.placed.filter(function (i) { return i.row >= headRows.length && i.col <= c && c < i.col + i.colSpan; });
+		if (body.length === 0 || body.some(function (i) { return i.colSpan > 1 || _apaPlain(i.cell.innerHTML) !== ""; }))
+			continue;
+		for (let item of layout.placed.filter(function (i) { return i.col <= c && c < i.col + i.colSpan; })) {
+			if (item.colSpan > 1)
+				item.cell.colSpan = item.cell.colSpan - 1;
+			else if (item.cell.parentNode)
+				item.cell.remove();
+		}
+	}
 }
 
 function _apaCorrelationSampleRows(table) {
@@ -1730,10 +1805,14 @@ function apaSampleSize(tableElement, title, otherTables) {
 		let t = _apaReadTable(tableOf(other));
 		let nCol = t.heads.findIndex(function (h) { return /^(N|n)$/.test(h); });
 		if (nCol >= 0) {
-			let grouped = t.heads.some(function (h, c) { return c > 0 && c < nCol && h !== ""; });
+			// "Descriptives - Score" lists the cells of one variable: N is the sum of all rows. Otherwise each
+			// variable starts a block in the first column and its groups add up.
+			// Only these two layouts add up; elsewhere (repeated-measures cells hold the same people) N is read as is
+			let oneVariable = /^Descriptives - /.test(titleOf(other).trim());
+			let grouped = oneVariable || /^Group Descriptives/.test(titleOf(other).trim()) || t.heads.slice(0, nCol).indexOf("Group") !== -1;
 			let sums = [];
 			for (let row of t.body) {
-				if (!grouped || row[0] !== "" || sums.length === 0)
+				if (!grouped || (!oneVariable && row[0] !== "") || sums.length === 0)
 					sums.push(0);
 				sums[sums.length - 1] += _apaCount(row[nCol]);
 			}
@@ -1816,6 +1895,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 
 	let turned = /^Descriptive Statistics/i.test(_apaPlain(info.title)) ? _apaTransposeDescriptives(table) : { turned: false };
 	_apaMergePairColumns(table);
+	_apaDropEmptyColumns(table);
 	_apaStatisticColumn(table);
 	let isCorrelationMatrix = _apaCorrelationMatrix(table);
 	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(_apaPlain(info.title)) || /Pearson|Spearman|Kendall/.test(table.textContent));
@@ -1987,6 +2067,10 @@ function buildAPATable(tableElement, info, tableNumber) {
 		if (cells.every(function (item) { return /^(\d[\d,]*([.]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
 			cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d[\d,]*)[.]0+/, "$1"); }); });
 	}
+	// Values JASP couldn't compute ("NaN") are shown with a dash, as APA does for empty cells
+	for (let item of layout.placed)
+		if (item.row >= headRows.length && /^(NaN|nan|-?Inf(inity)?|\.)$/.test(_apaPlain(item.cell.innerHTML)))
+			item.cell.textContent = "\u2014";
 	let groupThousands = /^en/.test(typeof currentLocaleId === "string" ? currentLocaleId : "en");
 	for (let item of layout.placed) {
 		if (item.row < headRows.length || isTextCell(item))
@@ -2074,7 +2158,9 @@ function buildAPATable(tableElement, info, tableNumber) {
 	// Sample size in the note, unless the table shows it
 	let sample = matrixN !== null ? { n: matrixN } : turned.n !== null && turned.n !== undefined ? { n: turned.n } : turned.turned ? { shown: true } : apaSampleSize(tableElement, _apaPlain(info.title), info.otherTables);
 	// Last resort: a count from the data, when the caller has one ({ n } or { varies: true })
-	if (!sample.shown && sample.n === undefined && !sample.varies && info.dataSampleSize)
+	// A count from the data (the external tool passes one) is exact for the rows the analysis used, so it wins
+	// over numbers worked out from the tables; only N shown in the table itself stays
+	if (!sample.shown && info.dataSampleSize && (info.dataSampleSize.n !== undefined || (sample.n === undefined && !sample.varies)))
 		sample = info.dataSampleSize;
 	if (sample.n !== undefined)
 		notes.general.unshift("<i>N</i> = " + (sample.n >= 1000 ? sample.n.toLocaleString("en") : sample.n) + ".");

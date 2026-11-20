@@ -23,4 +23,5 @@ General rules are in the owner's dev-conventions. This file holds only this proj
 
 - `cd src-tauri && cargo test --no-default-features`
 - `tests/ui/run.sh` (needs fixtures and Chrome)
+- `tests/corpus/dump.sh` then `tests/corpus/run.sh`: all of JASP's Data Library (472 tables). Must report 0 problems and 0 missing numbers before a change is done. The only known difference is none: quality-control wide-format data gives no data N on purpose.
 - APA rules: `~/Apps/jAPAsp/scratch/run-tests.sh` in the JASP workspace

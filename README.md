@@ -46,6 +46,13 @@ cargo test --no-default-features             # the .jasp reader, no WebKit neede
 
 `tests/ui/run.sh` uses JSON dumps in `tests/ui/fixtures/`, made with `japasp-tool --json`. They aren't in the repo.
 
+The corpus check runs every table in JASP's Data Library through the copier and checks it: no crashes, every number of JASP's in the copy, APA *p* values, no exponents outside Bayes factors, every column headed, *N* from the tables matching *N* from the data.
+
+```sh
+tests/corpus/dump.sh     # JSON from the installed JASP's Data Library (or a folder of .jasp files)
+tests/corpus/run.sh      # summary in the terminal, details in tests/corpus/report.html
+```
+
 ## License
 
 AGPL-3.0-or-later, because the table code comes from JASP, which is AGPL-3.0. See [LICENSE](LICENSE).

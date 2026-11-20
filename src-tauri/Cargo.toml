@@ -24,7 +24,7 @@ tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["arbitrary_precision"] }  # JASP files can hold numbers beyond f64 (1e400)
 thiserror = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

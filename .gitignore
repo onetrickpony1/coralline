@@ -3,3 +3,9 @@ src-tauri/gen/
 tests/ui/fixtures/*.json
 ui/_test.html
 ui/_shot.html
+
+tests/corpus/fixtures/
+tests/corpus/.dom.html
+tests/corpus/report.json
+tests/corpus/report.html
+ui/_corpus.html

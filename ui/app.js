@@ -32,7 +32,7 @@
 			const plain = models.map(plainTable);
 			const items = models.map(function (model, i) {
 				number++;
-				const item = { number: number, title: _apaPlain(model.get("title") || "") };
+				const item = { number: number, title: _apaPlain(model.get("title") || ""), model: model, plain: plain[i] };
 				try {
 					item.apa = buildAPATable(apaRenderTable(model), {
 						title: model.get("title"),
@@ -48,7 +48,7 @@
 				}
 				return item;
 			});
-			return { title: analysis.title || analysis.name || "Analysis", items: items };
+			return { title: analysis.title || analysis.name || "Analysis", name: analysis.name, sampleSize: analysis.sampleSize, items: items };
 		}).filter(function (group) { return group.items.length > 0; });
 	}
 

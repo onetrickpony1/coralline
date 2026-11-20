@@ -24,7 +24,12 @@ pub struct Data {
     connection: Connection,
     table: String,
     filter: Option<String>,
-    columns: Vec<(String, String)>,
+    /// (name, stored column, column id)
+    columns: Vec<(String, String, i64)>,
+    /// Stored columns of nominal or ordinal type (they mark a missing level with -1)
+    categorical: BTreeSet<String>,
+    /// Text that JASP reads as missing ("NaN", ".", "NA", ...), from the file's settings
+    empty_values: Vec<String>,
 }
 
 /// JASP's integer code for a missing value in nominal and ordinal columns
@@ -45,25 +50,63 @@ impl Data {
             .ok()
             .map(|id| format!("Filter_{id}"))
             .filter(|name| stored.contains(name));
+        let categorical: BTreeSet<String> = {
+            let mut statement =
+                connection.prepare("SELECT id FROM Columns WHERE dataSet = ?1 AND columnType IN ('nominal', 'ordinal', 'nominalText')")?;
+            let ids = statement.query_map([data_set], |r| r.get::<_, i64>(0))?.collect::<Result<Vec<_>, _>>()?;
+            ids.into_iter().map(|id| format!("Column_{id}")).collect()
+        };
         let columns = {
             let mut statement = connection.prepare("SELECT id, name FROM Columns WHERE dataSet = ?1")?;
             let rows = statement
-                .query_map([data_set], |r| Ok((r.get::<_, String>(1)?, format!("Column_{}", r.get::<_, i64>(0)?))))?
+                .query_map([data_set], |r| {
+                    let id = r.get::<_, i64>(0)?;
+                    Ok((r.get::<_, String>(1)?, format!("Column_{id}"), id))
+                })?
                 .collect::<Result<Vec<_>, _>>()?;
-            rows.into_iter().filter(|(_, stored_as)| stored.contains(stored_as)).collect()
+            rows.into_iter().filter(|(_, stored_as, _)| stored.contains(stored_as)).collect()
         };
-        Ok(Data { connection, table, filter, columns })
+        let mut empty_values: Vec<String> = ["", "NaN", "nan", ".", "NA"].iter().map(|s| s.to_string()).collect();
+        let settings: Option<String> = connection
+            .query_row("SELECT emptyValuesJson FROM DataSets WHERE id = ?1", [data_set], |r| r.get(0))
+            .ok()
+            .flatten();
+        if let Some(list) = settings
+            .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+            .and_then(|v| v.get("strings").and_then(Value::as_array).cloned())
+        {
+            empty_values.extend(list.iter().filter_map(|v| v.as_str().map(str::to_string)));
+        }
+        Ok(Data { connection, table, filter, columns, categorical, empty_values })
     }
 
     fn stored(&self, name: &str) -> Option<&str> {
-        self.columns.iter().find(|(n, _)| n == name).map(|(_, s)| s.as_str())
+        self.columns.iter().find(|(n, _, _)| n == name).map(|(_, s, _)| s.as_str())
+    }
+
+    /// SQL that is true when a stored column has a value: not NULL, not JASP's missing code, not one of the
+    /// empty-value texts, and not a label that is one of them (nominal columns keep "." as a label)
+    fn present(&self, column: &str) -> String {
+        let id = self.columns.iter().find(|(_, s, _)| s == column).map_or(-1, |(_, _, id)| *id);
+        let quote = |v: &String| format!("'{}'", v.replace('\'', "''"));
+        let empties = self.empty_values.iter().map(quote).collect::<Vec<_>>().join(", ");
+        // Every value has a label row, "" when it has no label: only real labels can mark a missing value
+        let empty_labels = self.empty_values.iter().filter(|v| !v.is_empty()).map(quote).collect::<Vec<_>>().join(", ");
+        // Nominal and ordinal columns mark a missing level with -1, unless -1 is a real level
+        let no_level = if self.categorical.contains(column) {
+            format!(" AND (\"{column}\" <> -1 OR EXISTS (SELECT 1 FROM Labels WHERE columnId = {id} AND value = -1))")
+        } else {
+            String::new()
+        };
+        format!(
+            "\"{column}\" IS NOT NULL AND \"{column}\" <> {MISSING_INT} \
+             AND NOT (typeof(\"{column}\") = 'text' AND \"{column}\" IN ({empties})) \
+             AND \"{column}\" NOT IN (SELECT value FROM Labels WHERE columnId = {id} AND label IN ({empty_labels})){no_level}"
+        )
     }
 
     fn count(&self, columns: &[&str]) -> rusqlite::Result<u64> {
-        let mut conditions: Vec<String> = columns
-            .iter()
-            .map(|c| format!("\"{c}\" IS NOT NULL AND \"{c}\" <> {MISSING_INT}"))
-            .collect();
+        let mut conditions: Vec<String> = columns.iter().map(|c| self.present(c)).collect();
         if let Some(filter) = &self.filter {
             conditions.push(format!("\"{filter}\" = 1"));
         }
@@ -74,6 +117,10 @@ impl Data {
 
     /// N for an analysis, from its options. None when it uses no known variables.
     pub fn sample_size(&self, options: &Value) -> Option<SampleSize> {
+        // Wide-format measurement data (quality control) has several measurements per row: rows aren't N
+        if options.get("dataFormat").and_then(Value::as_str) == Some("wideFormat") {
+            return None;
+        }
         // With a counts, frequency or weights variable, each row stands for many cases: rows aren't N
         for key in ["counts", "count", "frequency", "weights", "weight", "frequencyVariable", "countVariable"] {
             let mut weighted = BTreeSet::new();
@@ -143,12 +190,14 @@ pub(crate) mod tests {
         c.execute_batch(
             "CREATE TABLE DataSets (id INTEGER PRIMARY KEY);
              CREATE TABLE Filters (id INTEGER PRIMARY KEY, dataSet INT);
-             CREATE TABLE Columns (id INTEGER PRIMARY KEY, dataSet INT, name TEXT);
+             CREATE TABLE Columns (id INTEGER PRIMARY KEY, dataSet INT, name TEXT, columnType TEXT);
+             CREATE TABLE Labels (id INTEGER PRIMARY KEY, columnId INT, value INT, label TEXT);
              INSERT INTO DataSets VALUES (1);
              INSERT INTO Filters VALUES (1, 1);
-             INSERT INTO Columns VALUES (1, 1, 'x'), (2, 1, 'y'), (3, 1, 'group');
-             CREATE TABLE DataSet_1 (rowNumber INTEGER PRIMARY KEY, Filter_1 INT NOT NULL DEFAULT 1, Column_1 NUM NULL, Column_2 NUM NULL, Column_3 NUM NULL);
-             INSERT INTO DataSet_1 VALUES (1, 1, 1.0, 2.0, 0), (2, 1, NULL, 3.0, 1), (3, 1, 2.0, 4.0, 0), (4, 1, 3.0, 5.0, -2147483648), (5, 0, 4.0, 6.0, 1);",
+             INSERT INTO Columns VALUES (1, 1, 'x', 'scale'), (2, 1, 'y', 'scale'), (3, 1, 'group', 'nominal'), (4, 1, 'z', 'scale'), (5, 1, 'sex', 'nominal'), (6, 1, 'w', 'scale'), (7, 1, 'g2', 'nominal');
+             INSERT INTO Labels VALUES (1, 5, 0, 'F'), (2, 5, 1, 'M'), (3, 5, 2, '.'), (4, 2, 2, ''), (5, 2, 3, '');
+             CREATE TABLE DataSet_1 (rowNumber INTEGER PRIMARY KEY, Filter_1 INT NOT NULL DEFAULT 1, Column_1 NUM NULL, Column_2 NUM NULL, Column_3 NUM NULL, Column_4 NUM NULL, Column_5 INT NULL, Column_6 NUM NULL, Column_7 INT NULL);
+             INSERT INTO DataSet_1 VALUES (1, 1, 1.0, 2.0, 0, 'nan', 0, -1, 0), (2, 1, NULL, 3.0, 1, 1.5, 2, -1, -1), (3, 1, 2.0, 4.0, 0, 2.5, 1, 2, 1), (4, 1, 3.0, 5.0, -2147483648, 3.5, 0, 3, 0), (5, 0, 4.0, 6.0, 1, 4.5, 1, 4, 1);",
         )
         .unwrap();
     }
@@ -193,6 +242,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn text_nan_and_empty_value_labels_are_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        // z is 'nan' in row 1; sex is the "." label in row 2; row 5 is filtered out
+        let o = options(json!({ "types": ["scale", "nominal"], "value": ["z", "sex"] }), Some("listwise"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(2)));
+    }
+
+    #[test]
+    fn minus_one_is_missing_only_in_categorical_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        // w is a scale column where -1 is a value; g2 is nominal with -1 (no level) in row 2
+        let o = options(json!({ "types": ["scale", "nominal"], "value": ["w", "g2"] }), Some("listwise"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(3)));
+    }
+
+    #[test]
     fn a_counts_variable_means_rows_are_not_cases() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("d.sqlite");
@@ -203,6 +274,8 @@ pub(crate) mod tests {
         assert_eq!(data.sample_size(&o), None);
         o["counts"] = json!({ "types": [], "value": "" });  // the option is there but empty
         assert_eq!(data.sample_size(&o), Some(SampleSize::N(4)));
+        o["dataFormat"] = json!("wideFormat");
+        assert_eq!(data.sample_size(&o), None);
     }
 
     #[test]

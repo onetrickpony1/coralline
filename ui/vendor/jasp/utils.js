@@ -248,6 +248,7 @@ function formatColumn(column, type, format, alignNumbers, combine, modelFootnote
 
 	// some vars we need for sf:
 	var upperLimit	= (window.globSet && window.globSet.exponentAbove) || 1e6	// values this large are written as exponents
+	var smallExponents = !(window.globSet && window.globSet.smallExponents === false)	// values below the decimals as exponents (7.00×10⁻³)
 	var minLSD		= Infinity	// right most position of the least significant digit
 	var maxFSDOE	= -Infinity  // left most position of the least significant digit of the exponent in scientific notation
 	
@@ -266,7 +267,7 @@ function formatColumn(column, type, format, alignNumbers, combine, modelFootnote
 			let lsd = fsd - sf
 			let fsdoe
 	
-			if (Math.abs(content) >= upperLimit || Math.abs(content) <= Math.pow(10, -dp))
+			if (Math.abs(content) >= upperLimit || (smallExponents && Math.abs(content) <= Math.pow(10, -dp)))
 				fsdoe = fSDOE(content)   // first significant digit of exponent
 			
 			if (fsdoe > maxFSDOE)
@@ -344,7 +345,7 @@ function formatColumn(column, type, format, alignNumbers, combine, modelFootnote
 					{
 						formatted["content"] = (fixDecimals || isFinite(dp)) ? formatFixed(content, dp, noZeroLead, thousands) : formatPrecision(content, sf, false, thousands)
 					}
-					else if (Math.abs(content) >= upperLimit || Math.abs(content) < Math.pow(10, -dp) || (!fixDecimals && Math.abs(content) >= Math.pow(10, sf)))
+					else if (Math.abs(content) >= upperLimit || (smallExponents && Math.abs(content) < Math.pow(10, -dp)) || (!fixDecimals && Math.abs(content) >= Math.pow(10, sf)))
 					{
 						let decimalsExpon 		= fixDecimals ? dp : sf - 1;
 						// var paddingNeeded = Math.max(maxFSDOE - fSDOE(content), 0)

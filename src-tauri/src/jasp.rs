@@ -227,6 +227,22 @@ mod tests {
     }
 
     #[test]
+    fn numbers_beyond_f64_are_kept() {
+        let text = r#"{ "analyses": [{ "id": 1, "name": "X", "title": "X", "results": { "t": { "title": "T", "schema": { "fields": [] }, "data": [{ "v": 1e400 }] } } }] }"#;
+        let mut buffer = Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buffer);
+            z.start_file("analyses.json", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(text.as_bytes()).unwrap();
+            z.finish().unwrap();
+        }
+        buffer.set_position(0);
+        let file = read(buffer).unwrap();
+        let out = serde_json::to_string(&file).unwrap();
+        assert!(out.contains("1e+400"), "{out}");
+    }
+
+    #[test]
     fn a_non_zip_is_refused() {
         assert!(matches!(read(Cursor::new(b"not a zip".to_vec())), Err(Error::Zip(_))));
     }
