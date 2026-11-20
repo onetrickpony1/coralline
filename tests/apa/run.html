@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- JASP's results-page tests (number formatting and the APA table rules) against the vendored code in ui/vendor/jasp -->
+<script>var insideJASP = false; window.globSet = { decimals: "", pExact: false, normalizedNotation: true };</script>
+<script src="../../ui/vendor/jasp/jquery-3.7.0.js"></script>
+<script src="../../ui/vendor/jasp/underscore-min.js"></script>
+<script src="../../ui/vendor/jasp/backbone-1.5.0.js"></script>
+<script src="../../ui/vendor/jasp/jaspwidgets.js"></script>
+<script src="../../ui/vendor/jasp/object.js"></script>
+<script src="../../ui/vendor/jasp/utils.js"></script>
+<script src="../../ui/vendor/jasp/table.js"></script>
+<script src="utils-test.js"></script>
+</head><body><pre id="out"></pre>
+<script>
+var out = document.getElementById("out");
+window.onerror = function (m, src, line) { out.textContent += "ERROR " + m + " @" + src + ":" + line + "\n"; };
+try {
+	var r = runAllUtilTests();
+	var failed = r.results.filter(function (x) { return !x.passed; });
+	out.textContent += "passed " + r.passed + " failed " + r.failed + "\n" + failed.map(function (f) {
+		return "FAIL " + f.test + "\n  actual:   " + JSON.stringify(f.actual) + "\n  expected: " + JSON.stringify(f.expected);
+	}).join("\n");
+} catch (e) { out.textContent += "EXCEPTION " + e + "\n" + e.stack; }
+</script></body></html>
