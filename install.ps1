@@ -17,7 +17,12 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
 	Write-Host 'Downloading jAPAsp'
 	$zip = Join-Path $tmp 'japasp.zip'
-	Invoke-WebRequest -UseBasicParsing "https://github.com/$repo/releases/latest/download/japasp-windows-x86_64.zip" -OutFile $zip
+	try {
+		Invoke-WebRequest -UseBasicParsing "https://github.com/$repo/releases/latest/download/japasp-windows-x86_64.zip" -OutFile $zip
+	} catch {
+		Write-Host "Couldn't download jAPAsp. Check your internet connection. If it works, there may be no release yet: see https://github.com/$repo/releases"
+		return
+	}
 	Expand-Archive -Path $zip -DestinationPath $tmp -Force
 	New-Item -ItemType Directory -Force -Path $dir | Out-Null
 	Copy-Item (Join-Path $tmp 'japasp.exe') $exe -Force

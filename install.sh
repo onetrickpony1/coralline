@@ -18,7 +18,10 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading $asset"
-curl -fL --progress-bar "https://github.com/$repo/releases/latest/download/$asset" -o "$tmp/$asset"
+curl -fL --progress-bar "https://github.com/$repo/releases/latest/download/$asset" -o "$tmp/$asset" || {
+	echo "Couldn't download jAPAsp. Check your internet connection. If it works, there may be no release yet: see https://github.com/$repo/releases"
+	exit 1
+}
 tar -xzf "$tmp/$asset" -C "$tmp"
 # Replace the file instead of writing into it, so a running copy keeps working until it closes
 cp "$tmp/japasp" "$dir/japasp.new"
