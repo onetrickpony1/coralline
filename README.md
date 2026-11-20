@@ -42,6 +42,7 @@ To see a file's tables as JSON instead: `japasp-tool --json results.jasp`.
 
 - Only what is saved in the file is shown. Save again in JASP and the app reloads the tables by itself.
 - Tables are numbered in the order they appear in the file, from the number set in the menu.
+- **Limitation:** means, *SD*s and similar values always keep the zero before the decimal point (0.45), as APA asks for statistics that can be greater than 1. For a variable that can't go above 1, such as a proportion from 0 to 1, APA's rule would also allow .45, but the app can't tell a variable's limits from the file. Remove those zeros by hand if you want them gone.
 - The same APA copy is being proposed for JASP itself, as a "Copy APA Table" menu entry. The code in `ui/vendor/jasp` is shared with that change.
 
 ## Development
