@@ -2023,6 +2023,109 @@ function apaSampleSize(tableElement, title, otherTables) {
 	return { varies: true };
 }
 
+// ========== APA change log ==========
+// buildAPATable records what it changes, rule by rule, so the reader can check every change against APA 7.
+
+function _apaCellHtml(cell) {
+	// A cell as the reader sees it: text plus italics, bold, sub- and superscripts; no styles or layout helpers
+	let copy = cell.cloneNode(true);
+	for (let node of Array.from(copy.querySelectorAll("*")).reverse()) {
+		if (node.hasAttribute("data-apa-todo")) {
+			let mark = document.createElement("mark");
+			mark.append(...node.childNodes);
+			node.replaceWith(mark);
+		}
+		else if (/^(I|EM|B|STRONG|SUP|SUB)$/.test(node.tagName))
+			while (node.attributes.length > 0)
+				node.removeAttribute(node.attributes[0].name);
+		else
+			node.replaceWith(...node.childNodes);
+	}
+	return copy.innerHTML.replace(/&nbsp;| | | /g, " ").replace(/\s+/g, " ").trim();
+}
+
+function _apaShape(table) {
+	let rows = $(table).children("thead, tbody").children("tr").toArray();
+	let layout = _apaGrid(rows);
+	return { rows: rows.length, columns: Math.max(0, ...layout.grid.map(function (row) { return row.length; })) };
+}
+
+function _apaChangeLog(table) {
+	/**
+	 * @returns { changes, add(rule, detail), step(rule, detail, fn), compare(rule, detail, before, after) }
+	 * Each change: { rule, detail, cells (changed table cells), examples: [{ from, to, times }], removed, added, shape }
+	 */
+	let changes = [];
+	let snapshot = function () {
+		let cells = new Map();
+		for (let cell of table.querySelectorAll("th, td"))
+			cells.set(cell, _apaCellHtml(cell));
+		return cells;
+	};
+	let record = function (rule, detail, pairs, extra) {
+		let examples = [];
+		for (let pair of pairs) {
+			let same = examples.find(function (e) { return e.from === pair.from && e.to === pair.to; });
+			if (same)
+				same.times++;
+			else
+				examples.push({ from: pair.from, to: pair.to, times: 1 });
+		}
+		let change = Object.assign({ rule: rule, detail: detail || "", cells: pairs.length, examples: examples, removed: 0, added: 0, shape: null }, extra || {});
+		if (change.cells > 0 || change.removed > 0 || change.added > 0 || change.shape || change.always)
+			changes.push(change);
+		delete change.always;
+		return change;
+	};
+	return {
+		changes: changes,
+		add: function (rule, detail, examples) {
+			let change = record(rule, detail, (examples || []).filter(function (e) { return e.from !== e.to; }), { always: true });
+			change.cells = 0;  // notes and titles, not cells
+			return change;
+		},
+		step: function (rule, detail, fn) {
+			let before = snapshot();
+			let shapeBefore = _apaShape(table);
+			let result = fn();
+			let after = snapshot();
+			let shapeAfter = _apaShape(table);
+			let pairs = [];
+			let removed = 0;
+			let added = 0;
+			for (let [cell, html] of before) {
+				if (!after.has(cell))
+					removed++;
+				else if (after.get(cell) !== html)
+					pairs.push({ from: html, to: after.get(cell) });
+			}
+			for (let cell of after.keys())
+				if (!before.has(cell))
+					added++;
+			let shape = shapeBefore.rows !== shapeAfter.rows || shapeBefore.columns !== shapeAfter.columns ? { from: shapeBefore, to: shapeAfter } : null;
+			record(rule, detail, pairs, { removed: removed, added: added, shape: shape });
+			return result;
+		},
+		compare: function (rule, detail, shownTable, apaTable) {
+			// Cell by cell, by position: the table as JASP shows it against the same table rendered for APA
+			let rowsOf = function (t) { return $(t).children("thead, tbody").children("tr").toArray(); };
+			let shown = _apaGrid(rowsOf(shownTable));
+			let apa = _apaGrid(rowsOf(apaTable));
+			let pairs = [];
+			for (let item of apa.placed) {
+				let other = shown.grid[item.row] && shown.grid[item.row][item.col];
+				if (!other || (shown.grid[item.row - 1] || [])[item.col] === other || (item.col > 0 && shown.grid[item.row][item.col - 1] === other))
+					continue;
+				let from = _apaCellHtml(other);
+				let to = _apaCellHtml(item.cell);
+				if (from !== to)
+					pairs.push({ from: from, to: to });
+			}
+			return record(rule, detail, pairs);
+		}
+	};
+}
+
 function apaClipboardHTML(html) {
 	return "<html><head><meta charset=\"utf-8\"></head><body>" + html + "</body></html>";
 }
@@ -2031,12 +2134,16 @@ function buildAPATable(tableElement, info, tableNumber) {
 	/**
 	 * Builds an APA 7 version of a rendered results table.
 	 * @param tableElement	the <table> as drawn by JASPWidgets.tablePrimitive
-	 * @param info			{ title, subtitle, footnotes } from the table model
+	 * @param info			{ title, subtitle, footnotes } from the table model; shownTable, the table as JASP shows it,
+	 *						lets the change log list the decimals changed by apaRenderTable
 	 * @param tableNumber	number shown in "Table N"
-	 * @returns { html, text } for the clipboard
+	 * @returns { html, text, todo, changes } for the clipboard; changes lists what was changed and why (see _apaChangeLog)
 	 */
 	let table = tableElement.cloneNode(true);
 	let $table = $(table);
+	let log = _apaChangeLog(table);
+	if (info.shownTable)
+		log.compare(i18n("Decimals"), i18n("Two decimals for most statistics, three for p values and for columns whose small values two decimals would round away. Values under .001 become < .001. Large numbers are written out instead of as exponents, and a value that rounds to zero loses its minus sign (APA 7, 6.36)."), info.shownTable, tableElement);
 
 	// Drop what isn't part of an APA table: the title and subtitle rows, the toolbar, layout helpers and the footer
 	let theadRows = $table.children("thead").children("tr");
@@ -2044,20 +2151,24 @@ function buildAPATable(tableElement, info, tableNumber) {
 	$table.find("td.squash-left, .toolbar, .do-not-copy").remove();
 	$table.children("tfoot").remove();
 	$table.find("div.over-title-space").each(function () { $(this).replaceWith(this.childNodes); });
+	log.add(i18n("Title above the table"), i18n("The table number in bold and the title in italics go on their own lines above the table (APA 7, 7.10). JASP's title row, buttons and footer are taken out of the table."));
 
-	let turned = /^(Descriptive Statistics|Circular Descriptives)/i.test(_apaPlain(info.title)) ? _apaTransposeDescriptives(table) : { turned: false };
-	_apaPostHocPairs(table, _apaPlain(info.title));
-	_apaConfusionMatrix(table, _apaPlain(info.title));
-	_apaMergePairColumns(table);
-	_apaDropEmptyColumns(table);
-	_apaStatisticColumn(table);
-	let isCorrelationMatrix = _apaCorrelationMatrix(table);
-	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(_apaPlain(info.title)) || /Pearson|Spearman|Kendall/.test(table.textContent));
-	let starsNote = isCorrelationMatrix ? _apaCorrelationStars(table) : null;
-	let matrixN = isCorrelationMatrix ? _apaCorrelationSampleRows(table) : null;
-	let intervalLevel = isCorrelationMatrix ? _apaCorrelationIntervals(table) : null;
+	let titleText = _apaPlain(info.title);
+	let turned = /^(Descriptive Statistics|Circular Descriptives)/i.test(titleText)
+		? log.step(i18n("Variables in rows"), i18n("Descriptive statistics turned so the variables run down the side and the statistics across the top, as in APA's sample tables."), function () { return _apaTransposeDescriptives(table); })
+		: { turned: false };
+	log.step(i18n("Compared pairs"), i18n("The two columns naming the groups of a post hoc comparison become one column (A \u2013 B)."), function () { _apaPostHocPairs(table, titleText); });
+	log.step(i18n("Confusion matrix"), i18n("Observed and predicted classes get their own headings."), function () { _apaConfusionMatrix(table, titleText); });
+	log.step(i18n("Pairs and paths"), i18n("Pairs and paths split over several columns (A, -, B) become one column with one heading."), function () { _apaMergePairColumns(table); });
+	log.step(i18n("Empty columns"), i18n("Columns with nothing in them are removed."), function () { _apaDropEmptyColumns(table); });
+	log.step(i18n("Statistic column"), i18n("A column naming the statistics in each row gets a heading."), function () { _apaStatisticColumn(table); });
+	let isCorrelationMatrix = log.step(i18n("Correlation matrix"), i18n("Variables numbered in the rows and named by number across the top, with dashes on the diagonal, as in APA's sample correlation table."), function () { return _apaCorrelationMatrix(table); });
+	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(titleText) || /Pearson|Spearman|Kendall/.test(table.textContent));
+	let starsNote = isCorrelationMatrix ? log.step(i18n("Significance stars"), i18n("Stars on the correlations instead of a row of p values; the note explains them."), function () { return _apaCorrelationStars(table); }) : null;
+	let matrixN = isCorrelationMatrix ? log.step(i18n("Sample size rows"), i18n("Rows of n that are the same for every pair are removed; N goes in the note."), function () { return _apaCorrelationSampleRows(table); }) : null;
+	let intervalLevel = isCorrelationMatrix ? log.step(i18n("Confidence intervals"), i18n("Confidence limits move into square brackets under each correlation."), function () { return _apaCorrelationIntervals(table); }) : null;
 	if (isCorrelationMatrix)
-		_apaCorrelationLabelColumn(table);
+		log.step(i18n("Variable column"), i18n("The column of variable names gets the heading Variable."), function () { _apaCorrelationLabelColumn(table); });
 	let todo = [];
 
 	let headRows = $table.children("thead").children("tr").toArray();
@@ -2072,7 +2183,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 
 	// A "Statistic" column that only holds t tests (Student, Welch) is headed t
 	let headLast = headRows.length - 1;
-	if (headLast >= 0) {
+	if (headLast >= 0) log.step(i18n("t heading"), i18n("A Statistic column that only holds t tests (Student, Welch) is headed t."), function () {
 		let statistic = layout.placed.find(function (item) { return item.row === headLast && /^Statistic$/.test(_apaLabel(item.cell)); });
 		let testColumn = layout.placed.find(function (item) { return item.row === headLast && /^Test$/.test(_apaLabel(item.cell)); });
 		if (statistic && testColumn) {
@@ -2080,18 +2191,22 @@ function buildAPATable(tableElement, info, tableNumber) {
 			if (tests.length > 0 && tests.every(function (name) { return /^(Student|Welch)$/.test(name); }))
 				statistic.cell.textContent = "t";
 		}
-	}
+	});
 
 	// APA symbols: lower-case chi (χ², JASP writes a capital Χ) and × for interactions (JASP writes ✻)
-	for (let item of layout.placed)
-		_apaReplaceText(item.cell, function (text) { return text.replace(/\u03A7(?=²|\u00B2|\s*<sup)/g, "\u03C7").replace(/\u03A7²/g, "\u03C7²").replace(/\s*\u273B\s*/g, " \u00D7 "); });
+	log.step(i18n("Symbols"), i18n("Lower-case chi for \u03C7\u00B2 (JASP writes a capital \u03A7) and \u00D7 for interactions (JASP writes \u273B)."), function () {
+		for (let item of layout.placed)
+			_apaReplaceText(item.cell, function (text) { return text.replace(/\u03A7(?=²|\u00B2|\s*<sup)/g, "\u03C7").replace(/\u03A7²/g, "\u03C7²").replace(/\s*\u273B\s*/g, " \u00D7 "); });
+	});
 
 	// Standard abbreviations for JASP's labels (Std. Deviation -> SD), in headings and row labels
-	for (let item of layout.placed) {
-		let abbreviation = apaLabelAbbreviations[_apaLabel(item.cell)];
-		if (abbreviation !== undefined && $(item.cell).find("sub").length === 0)
-			_apaReplaceText(item.cell, function (text) { return text.trim() === "" ? text : text.replace(/\S.*\S|\S/, abbreviation); });
-	}
+	log.step(i18n("Abbreviations"), i18n("APA's standard abbreviations and symbols for JASP's labels, such as SD for Std. Deviation and SE for Standard Error (APA 7, 6.44)."), function () {
+		for (let item of layout.placed) {
+			let abbreviation = apaLabelAbbreviations[_apaLabel(item.cell)];
+			if (abbreviation !== undefined && $(item.cell).find("sub").length === 0)
+				_apaReplaceText(item.cell, function (text) { return text.trim() === "" ? text : text.replace(/\S.*\S|\S/, abbreviation); });
+		}
+	});
 
 	// Leading zeros: by column heading (p, r, ...) and by row label (correlation matrices). Confidence limits of a
 	// correlation are bounded too.
@@ -2112,89 +2227,97 @@ function buildAPATable(tableElement, info, tableNumber) {
 			if (layout.grid[r][c] && isZeroLeadLabel(layout.grid[r][c]))
 				zeroLeadColumns[c] = true;
 
-	for (let r = headRows.length; r < allRows.length; r++) {
-		let rowHasLabel = matrixOfCorrelations || layout.grid[r].some(function (cell) { return cell && isZeroLeadLabel(cell); });
-		for (let c = 0; c < columnCount; c++) {
-			let cell = layout.grid[r][c];
-			if (cell && (zeroLeadColumns[c] || rowHasLabel) && (layout.grid[r - 1] === undefined || layout.grid[r - 1][c] !== cell))
-				_apaDropZeroLead(cell);
+	log.step(i18n("Leading zeros"), i18n("No zero before the decimal point for values that can't be greater than 1, such as p, correlations and reliability coefficients (APA 7, 6.36)."), function () {
+		for (let r = headRows.length; r < allRows.length; r++) {
+			let rowHasLabel = matrixOfCorrelations || layout.grid[r].some(function (cell) { return cell && isZeroLeadLabel(cell); });
+			for (let c = 0; c < columnCount; c++) {
+				let cell = layout.grid[r][c];
+				if (cell && (zeroLeadColumns[c] || rowHasLabel) && (layout.grid[r - 1] === undefined || layout.grid[r - 1][c] !== cell))
+					_apaDropZeroLead(cell);
+			}
 		}
-	}
+	});
 
 	// Headings and row labels in APA wording ("Sum of squares", "Face type", "Food as reward"), with abbreviations
 	// that can't be guessed ("drp") highlighted; then italic symbols in headings. Row labels that are statistics
 	// ("Pearson's r", "N") get italic symbols too.
 	let unclearWords = [];
-	for (let item of layout.placed) {
-		if (item.row >= headRows.length && !isTextCell(item))
-			continue;
-		let unclear = [];
-		_apaReplaceText(item.cell, function (text, first) {
-			let tidy = apaTidyLabel(text, first);
-			unclear = unclear.concat(tidy.unclear);
-			return tidy.text;
-		});
-		_apaHighlightWords(item.cell, unclear);
-		unclearWords = unclearWords.concat(unclear.filter(function (w) { return unclearWords.indexOf(w) === -1; }));
-	}
+	log.step(i18n("Sentence case"), i18n("Headings and row labels in sentence case with words written out (Sum of Squares becomes Sum of squares, Face_type becomes Face type). Short names that can't be guessed are highlighted (APA 7, 7.12)."), function () {
+		for (let item of layout.placed) {
+			if (item.row >= headRows.length && !isTextCell(item))
+				continue;
+			let unclear = [];
+			_apaReplaceText(item.cell, function (text, first) {
+				let tidy = apaTidyLabel(text, first);
+				unclear = unclear.concat(tidy.unclear);
+				return tidy.text;
+			});
+			_apaHighlightWords(item.cell, unclear);
+			unclearWords = unclearWords.concat(unclear.filter(function (w) { return unclearWords.indexOf(w) === -1; }));
+		}
+	});
 	if (unclearWords.length > 0)
 		todo.push(i18n("write out or explain these names:") + " " + unclearWords.join(", "));
-	for (let row of headRows)
-		for (let cell of row.cells)
-			_apaItaliciseSymbols(cell);
-	for (let row of bodyRows)
-		for (let cell of row.cells) {
-			let label = _apaLabel(cell);
-			if (apaNoZeroLeadLabels.indexOf(label) !== -1 || apaItalicSymbols.indexOf(label) !== -1)
+	log.step(i18n("Italic symbols"), i18n("Statistical symbols in italics (M, SD, t, F, p, r), Greek letters upright (APA 7, 6.45)."), function () {
+		for (let row of headRows)
+			for (let cell of row.cells)
 				_apaItaliciseSymbols(cell);
-		}
+		for (let row of bodyRows)
+			for (let cell of row.cells) {
+				let label = _apaLabel(cell);
+				if (apaNoZeroLeadLabels.indexOf(label) !== -1 || apaItalicSymbols.indexOf(label) !== -1)
+					_apaItaliciseSymbols(cell);
+			}
+	});
 
 	// Every column needs a heading: empty ones over text get a placeholder (columns of only "-" or "→" belong to their
 	// neighbours and stay empty)
 	let missingHeadings = 0;
-	for (let c = 0; c < columnCount; c++) {
-		let headed = layout.placed.some(function (item) { return item.row < headRows.length && item.col <= c && c < item.col + item.colSpan && _apaPlain(item.cell.innerHTML) !== ""; });
-		let hasText = layout.placed.some(function (item) { return item.row >= headRows.length && item.col === c && /[\p{L}\d]/u.test(_apaPlain(item.cell.innerHTML)); });
-		let headCell = headLast >= 0 ? layout.grid[headLast][c] : null;
-		if (!headed && hasText && headCell && headCell.colSpan === 1) {
-			// A heading APA would use, from what the column holds; "Variable" is APA's default for the first column
-			let labels = layout.placed.filter(function (item) { return item.row >= headRows.length && item.col === c; }).map(function (item) { return _apaLabel(item.cell); }).filter(function (l) { return l !== ""; });
-			let heading = null;
-			let all = function (re) { return labels.length > 0 && labels.every(function (l) { return re.test(l); }); };
-			if (labels.some(function (l) { return /^\(?Intercept\)?$/.test(l); }))
-				heading = "Predictor";
-			else if (all(/^H([\d\u2080-\u2089]+|u|c)?(\s*\(.*\))?$/))
-				heading = "Hypothesis";
-			else if (all(/^Factor \d+$/))
-				heading = "Factor";
-			else if (all(/^Component \d+$/))
-				heading = "Component";
-			else if (all(/ \u2192 /))
-				heading = "Path";
-			else if (all(/^(Total( indirect)?|Direct|Indirect)( effects?)?$/i))
-				heading = "Effect";
-			else if (all(/^(Pooled effect|\u{1D70F}\u00B2?|\u03C4\u00B2?|I\u00B2|H\u00B2)$/u) && labels.some(function (l) { return l === "Pooled effect"; }))
-				heading = "Parameter";
-			else if (labels.some(function (l) { return /^(Residuals?|Within|Error)$/.test(l); }))
-				heading = "Source";
-			else if (labels.every(function (l) { return /^(Model(\s*\d+)?|M[\d₀-₉]+)$/.test(l); }))
-				heading = "Model";
-			else if (/\bTests\b/.test(_apaPlain(info.title)) && (c === 0 || labels.some(function (l) { return /^χ²/.test(l); })))
-				heading = "Test";
-			else if (/^Test of Sphericity/i.test(_apaPlain(info.title)) && c === 0)
-				heading = "Effect";
-			else if (c === 0 && _apaAreVariables(labels, info.variableNames))
-				heading = "Variable";  // only when the caller knows the analysis's variables and these are them
-			if (heading) {
-				headCell.textContent = heading;
-				continue;
+	log.step(i18n("Column headings"), i18n("Every column needs a heading (APA 7, 7.12). Empty headings get one from what the column holds, or a highlighted placeholder."), function () {
+		for (let c = 0; c < columnCount; c++) {
+			let headed = layout.placed.some(function (item) { return item.row < headRows.length && item.col <= c && c < item.col + item.colSpan && _apaPlain(item.cell.innerHTML) !== ""; });
+			let hasText = layout.placed.some(function (item) { return item.row >= headRows.length && item.col === c && /[\p{L}\d]/u.test(_apaPlain(item.cell.innerHTML)); });
+			let headCell = headLast >= 0 ? layout.grid[headLast][c] : null;
+			if (!headed && hasText && headCell && headCell.colSpan === 1) {
+				// A heading APA would use, from what the column holds; "Variable" is APA's default for the first column
+				let labels = layout.placed.filter(function (item) { return item.row >= headRows.length && item.col === c; }).map(function (item) { return _apaLabel(item.cell); }).filter(function (l) { return l !== ""; });
+				let heading = null;
+				let all = function (re) { return labels.length > 0 && labels.every(function (l) { return re.test(l); }); };
+				if (labels.some(function (l) { return /^\(?Intercept\)?$/.test(l); }))
+					heading = "Predictor";
+				else if (all(/^H([\d\u2080-\u2089]+|u|c)?(\s*\(.*\))?$/))
+					heading = "Hypothesis";
+				else if (all(/^Factor \d+$/))
+					heading = "Factor";
+				else if (all(/^Component \d+$/))
+					heading = "Component";
+				else if (all(/ \u2192 /))
+					heading = "Path";
+				else if (all(/^(Total( indirect)?|Direct|Indirect)( effects?)?$/i))
+					heading = "Effect";
+				else if (all(/^(Pooled effect|\u{1D70F}\u00B2?|\u03C4\u00B2?|I\u00B2|H\u00B2)$/u) && labels.some(function (l) { return l === "Pooled effect"; }))
+					heading = "Parameter";
+				else if (labels.some(function (l) { return /^(Residuals?|Within|Error)$/.test(l); }))
+					heading = "Source";
+				else if (labels.every(function (l) { return /^(Model(\s*\d+)?|M[\d₀-₉]+)$/.test(l); }))
+					heading = "Model";
+				else if (/\bTests\b/.test(_apaPlain(info.title)) && (c === 0 || labels.some(function (l) { return /^χ²/.test(l); })))
+					heading = "Test";
+				else if (/^Test of Sphericity/i.test(_apaPlain(info.title)) && c === 0)
+					heading = "Effect";
+				else if (c === 0 && _apaAreVariables(labels, info.variableNames))
+					heading = "Variable";  // only when the caller knows the analysis's variables and these are them
+				if (heading) {
+					headCell.textContent = heading;
+					continue;
+				}
+			}
+			if (!headed && hasText && headCell && headCell.colSpan === 1) {
+				headCell.innerHTML = _apaTodo(i18n("Add heading"));
+				missingHeadings++;
 			}
 		}
-		if (!headed && hasText && headCell && headCell.colSpan === 1) {
-			headCell.innerHTML = _apaTodo(i18n("Add heading"));
-			missingHeadings++;
-		}
-	}
+	});
 	if (missingHeadings > 0)
 		todo.push(i18n("add the missing column headings"));
 
@@ -2221,37 +2344,43 @@ function buildAPATable(tableElement, info, tableNumber) {
 		if (item.row === headRows.length - 1 && /^df\d*$/.test(_apaLabel(item.cell)))
 			dfColumns[item.col] = true;
 	let wholeColumns = Object.assign({}, dfColumns);
-	for (let item of layout.placed)
-		if (item.row === headRows.length - 1 && /^(n|N|Missing|Valid|Count)$/.test(_apaLabel(item.cell)))
-			wholeColumns[item.col] = true;
-	for (let c in wholeColumns) {
-		let cells = layout.placed.filter(function (item) { return item.col === +c && item.row >= headRows.length; });
-		if (cells.every(function (item) { return /^(\d+([.,]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
-			cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d+)[.,]0+/, "$1"); }); });
-	}
-	// Rows of counts too ("Count" in contingency tables): whole numbers when every value is one
-	for (let r = headRows.length; r < allRows.length; r++) {
-		if (!layout.grid[r].some(function (cell) { return cell && /^(Count|n|N)$/.test(_apaLabel(cell)); }))
-			continue;
-		let cells = layout.placed.filter(function (item) { return item.row === r && !isTextCell(item) && !/^(Count|n|N)$/.test(_apaLabel(item.cell)); });
-		if (cells.every(function (item) { return /^(\d[\d,]*([.]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
-			cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d[\d,]*)[.]0+/, "$1"); }); });
-	}
+	log.step(i18n("Whole numbers"), i18n("Counts (N, n, df, Count) shown without decimals when every value is a whole number."), function () {
+		for (let item of layout.placed)
+			if (item.row === headRows.length - 1 && /^(n|N|Missing|Valid|Count)$/.test(_apaLabel(item.cell)))
+				wholeColumns[item.col] = true;
+		for (let c in wholeColumns) {
+			let cells = layout.placed.filter(function (item) { return item.col === +c && item.row >= headRows.length; });
+			if (cells.every(function (item) { return /^(\d+([.,]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
+				cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d+)[.,]0+/, "$1"); }); });
+		}
+		// Rows of counts too ("Count" in contingency tables): whole numbers when every value is one
+		for (let r = headRows.length; r < allRows.length; r++) {
+			if (!layout.grid[r].some(function (cell) { return cell && /^(Count|n|N)$/.test(_apaLabel(cell)); }))
+				continue;
+			let cells = layout.placed.filter(function (item) { return item.row === r && !isTextCell(item) && !/^(Count|n|N)$/.test(_apaLabel(item.cell)); });
+			if (cells.every(function (item) { return /^(\d[\d,]*([.]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
+				cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d[\d,]*)[.]0+/, "$1"); }); });
+		}
+	});
 	// Values JASP couldn't compute ("NaN") are shown with a dash, as APA does for empty cells
-	for (let item of layout.placed)
-		if (item.row >= headRows.length && /^(NaN|nan|-?Inf(inity)?|\.)$/.test(_apaPlain(item.cell.innerHTML)))
-			item.cell.textContent = "\u2014";
+	log.step(i18n("Missing values"), i18n("Values JASP couldn't compute (NaN, Inf) are shown as a dash, as APA does for empty cells."), function () {
+		for (let item of layout.placed)
+			if (item.row >= headRows.length && /^(NaN|nan|-?Inf(inity)?|\.)$/.test(_apaPlain(item.cell.innerHTML)))
+				item.cell.textContent = "\u2014";
+	});
 	let groupThousands = /^en/.test(typeof currentLocaleId === "string" ? currentLocaleId : "en");
-	for (let item of layout.placed) {
-		if (item.row < headRows.length || isTextCell(item))
-			continue;
-		_apaReplaceText(item.cell, function (text) {
-			text = text.replace(/(\d)[ \u00A0\u2009\u202F]+%/g, "$1%");
-			if (groupThousands && !dfColumns[item.col])
-				text = text.replace(/(^|[^\d.,])(\d{4,})/g, function (all, before, digits) { return before + digits.replace(/\B(?=(\d{3})+$)/g, ","); });
-			return text;
-		});
-	}
+	log.step(i18n("Number format"), i18n("Commas in numbers of 1,000 or more, except degrees of freedom, and no space before % (APA 7, 6.38)."), function () {
+		for (let item of layout.placed) {
+			if (item.row < headRows.length || isTextCell(item))
+				continue;
+			_apaReplaceText(item.cell, function (text) {
+				text = text.replace(/(\d)[ \u00A0\u2009\u202F]+%/g, "$1%");
+				if (groupThousands && !dfColumns[item.col])
+					text = text.replace(/(^|[^\d.,])(\d{4,})/g, function (all, before, digits) { return before + digits.replace(/\B(?=(\d{3})+$)/g, ","); });
+				return text;
+			});
+		}
+	});
 	for (let item of layout.placed) {
 		if (item.row < headRows.length || isTextCell(item))
 			continue;
@@ -2306,13 +2435,22 @@ function buildAPATable(tableElement, info, tableNumber) {
 		colgroup.appendChild(col);
 	}
 	table.insertBefore(colgroup, table.firstChild);
+	log.add(i18n("Lines and type"), i18n("Horizontal lines only: above and below the headings, under spanning headings and at the bottom; no vertical lines, shading or bold (APA 7, 7.15). Text left-aligned, numbers centred, column widths set to fit, type %1 pt.").replace("%1", sizing.fontSize));
 
 	let notes = _apaNotes(info.footnotes);
 	let noteLabel = i18n("Note.");
-	if (starsNote && starsNote.text)
+	let footnoteTexts = (info.footnotes || []).map(function (f) { return _.isString(f) ? f : (f.symbol ? f.symbol + " " : "") + (f.text || ""); }).filter(function (t) { return _apaPlain(t).trim() !== ""; });
+	if (footnoteTexts.length > 0)
+		log.add(i18n("Note"), i18n("JASP's footnotes become one note under the table: general notes after Note. in italics, specific notes with their symbol, each as a full sentence (APA 7, 7.14)."),
+			[{ from: footnoteTexts.join(" "), to: notes.general.concat(notes.specific.map(function (n) { return (n.symbol ? n.symbol + " " : "") + n.text; })).join(" ") }]);
+	if (starsNote && starsNote.text) {
 		notes.specific.push(starsNote);
-	if (intervalLevel)
+		log.add(i18n("Probability note"), i18n("The note says what the stars mean."), [{ from: "", to: starsNote.text }]);
+	}
+	if (intervalLevel) {
 		notes.general.push(_apaEscape(i18n("Values in square brackets indicate the %1% confidence interval for each correlation.").replace("%1", intervalLevel)));
+		log.add(i18n("Interval note"), i18n("The note says what the brackets hold."), [{ from: "", to: notes.general[notes.general.length - 1] }]);
+	}
 
 	// Explain the abbreviations used in the table, unless the notes already do
 	let tableText = $(table).find("th, td").map(function () { return _apaPlain(this.innerHTML); }).get().join(" ");  // cell by cell, so words don't run together
@@ -2324,8 +2462,10 @@ function buildAPATable(tableElement, info, tableNumber) {
 		if (pattern.test(tableText) && noteText.indexOf(abbreviation + " =") === -1 && noteText.toLowerCase().indexOf(meaning.toLowerCase()) === -1)
 			explained.push(abbreviation + " = " + meaning);
 	}
-	if (explained.length > 0)
+	if (explained.length > 0) {
 		notes.general.unshift(_apaEscape(explained.join("; ")) + ".");
+		log.add(i18n("Abbreviations explained"), i18n("Abbreviations in the table are written out in the note, unless JASP's notes already do (APA 7, 7.14)."), [{ from: "", to: notes.general[0] }]);
+	}
 
 	// Sample size in the note, unless the table shows it
 	let sample = matrixN !== null ? { n: matrixN } : turned.n !== null && turned.n !== undefined ? { n: turned.n } : turned.turned ? { shown: true } : apaSampleSize(tableElement, _apaPlain(info.title), info.otherTables);
@@ -2339,6 +2479,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 	if (!sample.shown && !sample.none && fromData && (fromData.n !== undefined || fromData.range || fromData.meta || (sample.n === undefined && !sample.varies)))
 		sample = fromData;
 	let count = function (n) { return n >= 1000 ? n.toLocaleString("en") : String(n); };
+	let generalBefore = notes.general.length;
 	if (sample.meta) {
 		// Meta-analyses count studies, not people (APA: "Number of studies = 120, number of effects = 782, total N = 52,578.")
 		let parts = [];
@@ -2361,6 +2502,8 @@ function buildAPATable(tableElement, info, tableNumber) {
 		notes.general.unshift("<i>N</i> = " + _apaTodo(sample.varies ? i18n("sample sizes differ, give each") : i18n("add sample size")) + ".");
 		todo.push(sample.varies ? i18n("give the sample sizes, they differ between variables") : i18n("add the sample size"));
 	}
+	if (notes.general.length > generalBefore)
+		log.add(i18n("Sample size"), i18n("The note gives the sample size, worked out from the analysis's own tables or the data, unless the table shows it."), [{ from: "", to: notes.general[0] }]);
 
 	// Titles: APA wants a descriptive title; JASP's name the analysis but often not the variables
 	let title = apaTitleCase(apaTidyLabel(_apaPlain(info.title), true).text).replace(/\bT-Test\b/g, "t Test");
@@ -2369,7 +2512,10 @@ function buildAPATable(tableElement, info, tableNumber) {
 		titleHtml += " " + _apaTodo(i18n("describe what was measured"));
 		todo.push(i18n("make the title describe the variables"));
 	}
+	log.add(i18n("Title"), i18n("Title in title case and italics. APA wants it to describe the variables, so a title that doesn't gets a highlighted reminder (APA 7, 7.11)."), [{ from: _apaEscape(_apaPlain(info.title)), to: titleHtml }]);
 	let tooWide = columnWidths.reduce(function (a, b) { return a + b; }, 0) > apaPageTextWidth;
+	if (tooWide)
+		log.add(i18n("Page width"), i18n("The table is wider than a portrait page, so a reminder asks for a landscape page."));
 	if (tooWide)
 		todo.push(i18n("put the table on a landscape page, it is too wide for a portrait page"));
 
@@ -2407,5 +2553,11 @@ function buildAPATable(tableElement, info, tableNumber) {
 	for (let note of notes.specific)
 		lines.push(_apaPlain(note.symbol + " " + note.text));
 
-	return { html: html, text: lines.join("\n"), todo: todo };
+	for (let change of log.changes)
+		for (let example of change.examples) {
+			let clean = function (h) { return h.replace(/<span data-apa-todo="1"[^>]*>([^<]*)<\/span>/g, "<mark>$1</mark>").replace(/ style="[^"]*"/g, ""); };
+			example.from = clean(example.from);
+			example.to = clean(example.to);
+		}
+	return { html: html, text: lines.join("\n"), todo: todo, changes: log.changes };
 }

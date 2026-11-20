@@ -77,7 +77,8 @@
 						otherTables: plain.map(function (table, j) { return { table: table, title: models[j].get("title") }; })
 							.filter(function (_, j) { return j !== i; }),
 						dataSampleSize: analysis.sampleSize,  // counted from the saved data, used when the tables don't say
-						variableNames: analysis.variables     // lets the first column be headed "Variable" when it lists them
+						variableNames: analysis.variables,    // lets the first column be headed "Variable" when it lists them
+						shownTable: plain[i]                  // the table as JASP shows it, so the change list includes decimals
 					}, number);
 				} catch (e) {
 					item.error = String(e && e.message || e);
@@ -261,13 +262,21 @@
 			return node;
 		}
 
+		const changesButton = el("button", { type: "button", class: "btn", title: "Show what was changed to match APA 7 (W)", "aria-expanded": "false", "aria-controls": id + "-changes", text: "What changed" });
 		const textButton = el("button", { type: "button", class: "btn", title: "Copy as plain text, with tabs between columns (T)", text: "Copy text" });
 		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs (C)" }, [el("span", { class: "swap", text: "Copy APA table" })]);
-		head.appendChild(el("div", { class: "actions" }, [textButton, button]));
+		head.appendChild(el("div", { class: "actions" }, [changesButton, textButton, button]));
 
 		const paper = el("div", { class: "paper" });
 		paper.innerHTML = item.apa.html;
 		node.appendChild(el("div", { class: "tray" }, [paper]));
+
+		const changes = el("section", { class: "changes", id: id + "-changes", "aria-label": "What changed in table " + item.number });
+		changes.hidden = true;
+		node.appendChild(changes);
+		changesButton.addEventListener("click", function () { toggleChanges(item); });
+		item.changesButton = changesButton;
+		item.changesPanel = changes;
 
 		const todo = item.apa.todo;
 		if (todo.length > 0) {
@@ -287,6 +296,73 @@
 		node.addEventListener("pointerdown", function () { setCurrent(id); });
 		item.button = button;
 		return node;
+	}
+
+	// The change list: every rule that changed something, with each distinct change as before -> after
+	function toggleChanges(item, open) {
+		if (!item || !item.changesPanel)
+			return;
+		const panel = item.changesPanel;
+		const show = open === undefined ? panel.hidden : open;
+		if (show && panel.childElementCount === 0)
+			fillChanges(panel, item.apa.changes || []);
+		panel.hidden = !show;
+		item.changesButton.setAttribute("aria-expanded", String(show));
+		item.changesButton.classList.toggle("on", show);
+	}
+
+	function fillChanges(panel, changes) {
+		const cells = changes.reduce(function (n, c) { return n + c.cells; }, 0);
+		panel.appendChild(el("p", { class: "lead", text: plural(changes.length, "change", "changes") + " to match APA 7" + (cells > 0 ? ", " + plural(cells, "cell", "cells") + " rewritten." : ".") + " Before is the table as JASP shows it." }));
+		const fragment = function (html, empty) {
+			const span = el("span", { class: "v" + (html === "" ? " none" : "") });
+			if (html === "")
+				span.textContent = empty;
+			else
+				span.innerHTML = html;  // table content, inserted like the preview itself
+			return span;
+		};
+		const list = el("ol", { class: "rules" });
+		for (const change of changes) {
+			const facts = [];
+			if (change.cells > 0)
+				facts.push(plural(change.cells, "cell", "cells"));
+			if (change.shape)
+				facts.push(change.shape.from.rows + " \u00D7 " + change.shape.from.columns + " \u2192 " + change.shape.to.rows + " \u00D7 " + change.shape.to.columns + " (rows \u00D7 columns)");
+			else if (change.removed > 0)
+				facts.push(plural(change.removed, "cell", "cells") + " removed");
+			const entry = el("li", {}, [
+				el("div", { class: "rule" }, [el("strong", { text: change.rule }), facts.length ? el("span", { class: "facts", text: facts.join(", ") }) : null].filter(Boolean)),
+				el("p", { class: "why", text: change.detail })
+			]);
+			if (change.examples.length > 0) {
+				const pairs = el("ul", { class: "pairs" });
+				change.examples.forEach(function (example, i) {
+					const row = el("li", {}, [
+						fragment(example.from, "(nothing)"),
+						el("span", { class: "arrow", "aria-label": "becomes", text: "\u2192" }),
+						fragment(example.to, "(removed)")
+					]);
+					if (example.times > 1)
+						row.appendChild(el("span", { class: "times", text: "\u00D7" + example.times }));
+					if (i >= 6)
+						row.hidden = true;
+					pairs.appendChild(row);
+				});
+				entry.appendChild(pairs);
+				if (change.examples.length > 6) {
+					const more = el("button", { type: "button", class: "more", text: "Show " + (change.examples.length - 6) + " more" });
+					more.addEventListener("click", function () {
+						for (const row of pairs.children)
+							row.hidden = false;
+						more.remove();
+					});
+					entry.appendChild(more);
+				}
+			}
+			list.appendChild(entry);
+		}
+		panel.appendChild(list);
 	}
 
 	// Each click on a to-do chip moves to the next highlighted spot in that table
@@ -779,6 +855,7 @@
 		else if (key === "C" && e.shiftKey) copyAll(false);
 		else if (key === "c") copyItem(currentItem(), false);
 		else if (key === "t" || key === "T") copyItem(currentItem(), true);
+		else if (key === "w" || key === "W") toggleChanges(currentItem());
 		else if (key === "h" || key === "H") { setHighlights(!state.highlights); toast(state.highlights ? "Highlights shown in the preview." : "Highlights hidden in the preview. Copies still have them."); }
 		else if (key === "?") $id("keys").showModal();
 	});

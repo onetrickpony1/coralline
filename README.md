@@ -21,6 +21,7 @@ In the app:
 - **Find and filter:** search tables by name, or show only the ones still to do or ready to paste. A ring shows how many are ready.
 - **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns.
 - **Number the first table** to match your paper (start at Table 4 if three tables come before).
+- **See what changed:** **What changed** on each table (or <kbd>W</kbd>) lists every APA 7 rule that changed something, with each value before and after ("Std. Deviation" to *SD*, "0.3967" to ".40") and the APA section it comes from.
 - **Jump to each highlight** by clicking the to-do under a table. Hide highlights in the preview to check the layout (copies keep them).
 - **Recent files**, preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>).
 

@@ -67,6 +67,17 @@
 				entry.jasp = item.plain ? item.plain.outerHTML : "";
 				var text = apa.text;
 
+				// The change list: present, every entry with a reason, no rule with nothing to show, no markup leaking in
+				if (!Array.isArray(apa.changes) || apa.changes.length === 0)
+					entry.problems.push("no change list");
+				else
+					apa.changes.forEach(function (c) {
+						if (!c.rule || !c.detail)
+							entry.problems.push("change without a rule or reason");
+						if (c.examples.some(function (e) { return /style=|class=|data-apa-todo|undefined/.test(e.from + e.to) || e.from === e.to; }))
+							entry.problems.push("bad change example in " + c.rule);
+					});
+
 				// Words that mean something went wrong
 				var bad = /^(NaN|undefined|null|-?Infinity|\[object.*)$/;
 				$(apa.html).find("td, th").each(function () {
