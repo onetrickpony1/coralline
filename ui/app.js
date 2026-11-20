@@ -1485,7 +1485,8 @@
 		if (mod && (key === "=" || key === "+")) { e.preventDefault(); setZoom(state.zoom + 0.1); return; }
 		if (mod && (key === "-" || key === "_")) { e.preventDefault(); setZoom(state.zoom - 0.1); return; }
 		if (mod && key === "0") { e.preventDefault(); setZoom(1); return; }
-		if (key === "?" && !typing && !mod) { $id("keys").showModal(); return; }
+		// F1 works on every keyboard and even while typing; "?" (Shift and /) stays for those used to it
+		if (key === "F1" || (key === "?" && !typing && !mod && state.singleKeys)) { e.preventDefault(); $id("keys").showModal(); return; }
 		if (typing || mod || e.altKey || !state.file || !state.singleKeys)
 			return;
 		if (key === "/") { e.preventDefault(); search.focus(); }

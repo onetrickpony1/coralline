@@ -32,7 +32,7 @@ In the app:
 - **Light, dark and pink themes**, or follow the system. Works in a narrow window too: the table list opens as a drawer.
 - **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
 - **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in (needs a free GitHub account).
-- **Recent files** (also in the menu once a file is open), preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>). Single-key shortcuts can be turned off in the menu, for screen readers.
+- **Recent files** (also in the menu once a file is open), preview size, and keyboard shortcuts for everything (press <kbd>F1</kbd>). Single-key shortcuts can be turned off in the menu, for screen readers.
 
 ## Install
 
