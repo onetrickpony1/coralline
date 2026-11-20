@@ -50,6 +50,7 @@
 - **Group sizes are *n*** in descriptives by group, as APA asks; *N* stays for the whole sample.
 - **No space before a full stop after an italic word** in notes ("group *Treat*." instead of "group *Treat* .").
 - **Settings for the files you use most are kept**: the 50 remembered are now the 50 most recently used, not the first 50 opened.
+- **The marks in the table list line up**: the yellow dots were wider than the others and sat higher, because they picked up the to-do row's style.
 - <kbd>Esc</kbd> in the keyboard shortcuts window no longer clears the search; Number the first table can't be changed with no file open; the table list header no longer jumps while it folds away.
 - **The copy buttons are always on screen.** A wide table made the page wider than the window and pushed **Copy APA table** off the right edge, even on a 1366 px laptop screen. Long notes now wrap at the page width in the preview, as they do when pasted.
 - **A failed reload no longer says the tables were updated.** If the file couldn't be read (JASP still writing it), the app said "Tables updated" and kept the old numbers. It now says the tables are from before, and tries again at the next check.

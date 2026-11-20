@@ -600,7 +600,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .paper .flash { animation: flash 1.2s var(--ease) 2; border-radius: 2px; }
 @keyframes flash { 50% { box-shadow: 0 0 0 4px var(--todo); } }
 
-.todo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 14px; }
+div.todo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .todo .lead { font-size: 12.5px; color: var(--ink-2); margin-right: 2px; }
 .todo button {
 	/* The same glass as the other buttons (.btn); the app's one yellow (--todo, as in the sidebar) only in the dot */
@@ -642,7 +642,7 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 .todo button:hover { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--edge) 70%, transparent), inset 0 0 0 1px var(--accent); }
 .todo button:active { transform: scale(0.97); }
-.todo.ready { color: var(--ok); font-size: 13px; font-weight: 550; }
+div.todo.ready { color: var(--ok); font-size: 13px; font-weight: 550; }
 .card .error { margin: 0 16px 16px; color: var(--danger); }
 
 .btn.on { box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
@@ -909,3 +909,8 @@ body.dragging .dropping { opacity: 1; }
 .search-clear:not([hidden]) { animation: pop-in 0.25s var(--ease); }
 #layout:not([hidden]), #empty:not([hidden]) { animation: fade-in 0.3s ease-out; }
 .recent:not([hidden]) { animation: rise 0.3s var(--ease) 0.05s both; }
+
+/* Every mark the same size, in one column at the right edge (the card's to-do row style once leaked onto the
+   yellow dots, which share its class name, making them wider and lifting them) */
+.side-list a .t { flex: 1 1 0; min-width: 0; }
+.side-list a .mark { margin-left: auto; padding: 0; }
