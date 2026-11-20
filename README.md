@@ -60,7 +60,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/one
 
 1. Save your work in JASP.
 2. Open the `.jasp` file in jAPAsp: drop it on the window, or click **Open JASP file**. You can also start it with a file: `japasp results.jasp`.
-3. Click **Copy APA table** on a table (or press <kbd>C</kbd>; <kbd>J</kbd> and <kbd>K</kbd> move between tables), then paste it into your document.
+3. Click **Copy APA table** on a table (or press <kbd>C</kbd>; <kbd>K</kbd> goes to the next table and <kbd>J</kbd> to the previous one), then paste it into your document.
 4. Replace what is highlighted in yellow (click the to-do under the table for what to write), then remove the yellow: in Word, **Home › Text Highlight Colour › No Colour**; in Google Docs, the highlighter, then **None**.
 
 To see a file's tables as JSON instead: `japasp --json results.jasp`.

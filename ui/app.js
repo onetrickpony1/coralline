@@ -1600,8 +1600,8 @@
 		if (typing || mod || e.altKey || !state.file || !state.singleKeys)
 			return;
 		if (key === "/") { e.preventDefault(); search.focus(); }
-		else if (key === "j" || key === "J") step(1);
-		else if (key === "k" || key === "K") step(-1);
+		else if (key === "j" || key === "J") step(-1);
+		else if (key === "k" || key === "K") step(1);
 		else if (key === "C" && e.shiftKey) copyAll(false);
 		else if (key === "c" || key === "C") copyItem(currentItem(), false);  // C without Shift is Caps Lock
 		else if (key === "t" || key === "T") copyItem(currentItem(), true);
