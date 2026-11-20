@@ -498,9 +498,32 @@ main { flex: 1; min-height: 0; display: flex; }
 .side-list a.current { background: var(--glass-solid); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1), inset 0 0 0 1px var(--edge); }
 .side-list a .n { min-width: 2ch; color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; }
 .side-list a .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-list a .state { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--todo); box-shadow: 0 0 0 1px color-mix(in srgb, var(--todo-ink) 35%, transparent); }
-.side-list a .state.ready { background: var(--ok); box-shadow: none; }
-.side-list a .state.error { background: var(--danger); box-shadow: none; }
+/* Status dots: drawn as soft-edged gradients, which WebKit smooths (a small border-radius circle comes out jagged) */
+.side-list a .state {
+	--dot: var(--todo);
+	position: relative;
+	width: 10px;
+	height: 10px;
+	flex: none;
+	background: radial-gradient(circle closest-side, var(--dot) 0 62%, color-mix(in srgb, var(--dot) 70%, var(--todo-ink)) 72%, transparent 100%);
+}
+.side-list a .state.ready { --dot: var(--ok); background: radial-gradient(circle closest-side, var(--dot) 0 70%, transparent 100%); }
+.side-list a .state.error { --dot: var(--danger); background: radial-gradient(circle closest-side, var(--dot) 0 70%, transparent 100%); }
+/* A soft halo that breathes on tables still to do: opacity and scale only, so it costs the compositor nothing */
+.side-list a .state:not(.ready):not(.error)::after {
+	content: "";
+	position: absolute;
+	inset: -4px;
+	border-radius: 50%;
+	background: radial-gradient(circle closest-side, color-mix(in srgb, var(--dot) 70%, transparent) 0, transparent 100%);
+	opacity: 0;
+	animation: hum 2.4s ease-in-out infinite;
+	pointer-events: none;
+}
+@keyframes hum {
+	0%, 100% { opacity: 0.15; transform: scale(0.6); }
+	50% { opacity: 0.85; transform: scale(1); }
+}
 .side-list a .copied { color: var(--ok); width: 14px; height: 14px; flex: none; }
 .side-list .none { color: var(--ink-3); font-size: 13px; padding: 12px 10px; }
 

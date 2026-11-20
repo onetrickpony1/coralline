@@ -17,6 +17,7 @@
 - **See exactly what was changed.** A **What changed** button on each table (or <kbd>W</kbd>) lists every rule that changed something, why APA 7 asks for it, and each value before and after, compared with the table as JASP shows it: decimals, leading zeros, abbreviations, italics, headings, notes, the title and the layout.
 
 ### Fixes
+- **Smooth status dots.** The dots next to each table in the sidebar had jagged, pixelated edges; they are now drawn smooth, and the yellow ones (still to do) pulse gently. Reduce effects stops the pulse.
 - **Correlation tables with confidence intervals follow APA.** Each interval goes in square brackets under its *r* (".24 [−.10, .54]") instead of separate Lower and Upper rows, with a note saying so. Correlations show two decimals (a third only for values under .01), the copy uses true minus signs, and JASP's significance note becomes "*p < .05. **p < .01. ***p < .001."
 - **Smooth scrolling on Linux.** A workaround for blank windows on older NVIDIA drivers made WebKit copy every frame through memory, and it was on for everyone. It now applies only on Wayland with NVIDIA drivers older than 545. Setting `WEBKIT_DISABLE_DMABUF_RENDERER` yourself still wins.
 - **Files with very large numbers open.** A meta-analysis file in JASP's Data Library didn't open ("number out of range"); now it does.
