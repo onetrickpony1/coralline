@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-11-20
 
 ### Features
 - **First version.** Open a saved JASP file and copy any of its tables as an APA 7 table, with what only you can add highlighted.
@@ -58,6 +58,7 @@
 - **Student's whole *df* shows without decimals** ("42") next to Welch's ("37.86"), instead of "42.00".
 - **Tables JASP couldn't compute, or left empty, are shown as such** instead of disappearing and shifting the numbers.
 - **Analyses with the same name are numbered** ("Linear Regression (2)"); the list shows the tidied table titles, with the full title on hover.
+- **The installers say plainly when there's nothing to download** (no internet, or no release yet), instead of PowerShell's red "Not Found" error.
 - **Files with only plots** say so, instead of "no results tables".
 - **No match** says which filter is on and offers Clear search and Show all tables.
 - **<kbd>K</kbd> goes to the next table and <kbd>J</kbd> to the previous one.**
