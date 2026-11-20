@@ -661,6 +661,14 @@
 		});
 	}
 
+	document.addEventListener("click", function (e) {
+		const button = e.target.closest(".side-foot [data-link]");
+		if (button && button.dataset.link === "feedback")
+			openFeedback();
+		else if (button && button.dataset.link === "credit")
+			openLink(links.profile);
+	});
+
 	// The table list on the left: shown, or folded away so the tables get the whole width
 	function setSidebar(on) {
 		state.sidebar = on;

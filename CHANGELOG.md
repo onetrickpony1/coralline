@@ -18,7 +18,7 @@
 - **One-line install and updates.** Install with one line on Windows, Linux or macOS (see the README); run it again to update. On Linux it adds jAPAsp to the app menu.
 - **The command is now `japasp`** (it was `japasp-tool`). Your theme, recent files and other settings move over by themselves the first time the new version starts. `japasp --version` prints the version.
 - **Hide the table list.** The button at the left of the title bar (or <kbd>B</kbd>) folds the list of tables away so the tables use the whole window, and brings it back. The app remembers your choice.
-- **Feedback and problems** in the menu opens a feedback form on GitHub with the app version and your system filled in. The menu also says who made jAPAsp, with a link to the GitHub profile.
+- **Feedback and problems** in the menu opens a feedback form on GitHub with the app version and your system filled in. The menu and the bottom of the table list also say who made jAPAsp, with a link to the GitHub profile.
 
 ### Fixes
 - **App search shows the chosen icon straight away (KDE).** After you picked another app icon colour, KDE's app search and menu kept the old icon for up to a minute; now they update at once.

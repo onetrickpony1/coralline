@@ -472,6 +472,12 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 /* The contents keep their size while the panel opens and closes, instead of reflowing */
 .side > .summary, .side > .side-list { min-width: 284px; box-sizing: border-box; }
+.side > .side-foot { min-width: 284px; box-sizing: border-box; }
+.side-foot { flex: none; display: grid; gap: 2px; padding: 8px; border-top: 1px solid var(--hair); }
+.side-foot button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0; border-radius: 9px; background: none; font: 500 12.5px/1.2 var(--font); color: var(--ink-2); text-align: left; cursor: pointer; transition: background-color 0.15s, color 0.15s; }
+.side-foot button:hover, .side-foot button:focus-visible { background: var(--accent-soft); color: var(--ink); outline: none; }
+.side-foot svg { width: 16px; height: 16px; flex: none; }
+.side-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side > .filters { min-width: 260px; box-sizing: border-box; }
 #sideButton .fill { fill: currentColor; stroke: none; opacity: 0.55; transition: opacity 0.2s var(--ease); }
 #sideButton.off .fill { opacity: 0; }
