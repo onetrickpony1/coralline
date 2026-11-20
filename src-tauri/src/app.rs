@@ -145,7 +145,27 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
         write_if_changed(&apps.join(format!("{id}.desktop")), entry(&id, &icon, true).as_bytes())?;
     }
     let current = file_of(variant_name(variant));
-    write_if_changed(&apps.join("japasp.desktop"), entry("japasp", &current, false).as_bytes())
+    if write_if_changed(&apps.join("japasp.desktop"), entry("japasp", &current, false).as_bytes())? {
+        refresh_app_menu();
+    }
+    Ok(())
+}
+
+/// KDE's app search and menu read a cache of the desktop entries (sycoca) that it only rebuilds now and then, so
+/// a new launcher icon would show up late. Asks KDE to rebuild it now, in the background; elsewhere nothing to do.
+#[cfg(target_os = "linux")]
+fn refresh_app_menu() {
+    for tool in ["kbuildsycoca6", "kbuildsycoca5"] {
+        let started = std::process::Command::new(tool)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Ok(mut child) = started {
+            std::thread::spawn(move || child.wait());  // reap it, so it doesn't linger as a zombie
+            return;
+        }
+    }
 }
 
 /// For the installer: the launcher entry and icons, before the app has been opened (Linux only; elsewhere a no-op)
@@ -159,11 +179,13 @@ pub fn install_desktop_entry() -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Returns whether the file was written
+fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
     if std::fs::read(path).map(|old| old == bytes).unwrap_or(false) {
-        return Ok(());
+        return Ok(false);
     }
-    std::fs::write(path, bytes)
+    std::fs::write(path, bytes)?;
+    Ok(true)
 }
 
 /// Plain text only (tab-separated), for spreadsheets and plain editors
