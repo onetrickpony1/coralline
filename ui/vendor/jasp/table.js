@@ -2352,6 +2352,8 @@ function buildAPATable(tableElement, info, tableNumber) {
 			let cells = layout.placed.filter(function (item) { return item.col === +c && item.row >= headRows.length; });
 			if (cells.every(function (item) { return /^(\d+([.,]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
 				cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d+)[.,]0+/, "$1"); }); });
+			else if (dfColumns[c])  // Student's df (42) next to Welch's (41.98): each whole df loses its decimals
+				cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d+)[.,]0+(\s*)$/, "$1$2"); }); });
 		}
 		// Rows of counts too ("Count" in contingency tables): whole numbers when every value is one
 		for (let r = headRows.length; r < allRows.length; r++) {

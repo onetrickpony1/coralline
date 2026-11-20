@@ -868,6 +868,20 @@ function test_buildAPATable() {
 	t(matrixLines[6], "\tLower 95% CI\t.40", "apa text: correlation CI loses the zero");
 }
 
+function test_apaMixedDf() {
+	_reset();
+	var t = _assertEq;
+	var apa = buildAPATable(apaRenderTable(new JASPWidgets.table({ title: "Independent Samples T-Test", schema: { fields: [
+		{ name: "v", title: "", type: "string" }, { name: "test", title: "Test", type: "string" },
+		{ name: "s", title: "Statistic", type: "number", format: "sf:4;dp:3" }, { name: "df", title: "df", type: "number", format: "sf:4;dp:3" },
+		{ name: "p", title: "p", type: "pvalue", format: "dp:3;p:.001" } ] },
+		data: [ { v: "drp", test: "Student", s: -2.267, df: 42, p: 0.028 }, { v: "", test: "Welch", s: -2.31, df: 37.855, p: 0.026 } ], footnotes: [] })),
+		{ title: "Independent Samples T-Test", footnotes: [] }, 1);
+	var lines = apa.text.split("\n");
+	t(lines[3].split("\t")[3], "42", "apa: Student's whole df without decimals next to Welch's");
+	t(lines[4].split("\t")[3], "37.86", "apa: Welch's df keeps its decimals");
+}
+
 function test_apaChangeLog() {
 	_reset();
 	var t = _assertEq;
@@ -929,6 +943,7 @@ function runAllUtilTests() {
 	test_formatColumn_edges();
 	test_buildAPATable();
 	test_apaChangeLog();
+	test_apaMixedDf();
 
 	return {
 		passed: utilsTestPassed,
