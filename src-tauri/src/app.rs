@@ -22,17 +22,31 @@ fn initial_file(state: State<InitialFile>) -> Option<String> {
     state.0.lock().ok()?.take().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// When the file was last saved (milliseconds), so the window can reload it after JASP saves again.
+/// None when the file is gone or unreadable.
 #[tauri::command]
-fn copy_apa(html: String, text: String, state: State<Clipboard>) -> Result<(), String> {
+fn file_stamp(path: String) -> Option<u64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    Some(modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
+}
+
+fn with_clipboard(state: &State<Clipboard>, f: impl FnOnce(&mut arboard::Clipboard) -> Result<(), arboard::Error>) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "the clipboard is busy".to_string())?;
     if guard.is_none() {
         *guard = Some(arboard::Clipboard::new().map_err(|e| e.to_string())?);
     }
-    guard
-        .as_mut()
-        .expect("set above")
-        .set_html(html, Some(text))
-        .map_err(|e| e.to_string())
+    f(guard.as_mut().expect("set above")).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn copy_apa(html: String, text: String, state: State<Clipboard>) -> Result<(), String> {
+    with_clipboard(&state, |c| c.set_html(html, Some(text)))
+}
+
+/// Plain text only (tab-separated), for spreadsheets and plain editors
+#[tauri::command]
+fn copy_text(text: String, state: State<Clipboard>) -> Result<(), String> {
+    with_clipboard(&state, |c| c.set_text(text))
 }
 
 pub fn run(file: Option<PathBuf>) {
@@ -46,7 +60,7 @@ pub fn run(file: Option<PathBuf>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(Clipboard(Mutex::new(None)))
         .manage(InitialFile(Mutex::new(file)))
-        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa])
+        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa, copy_text, file_stamp])
         .run(tauri::generate_context!())
         .expect("the app window couldn't start");
 }

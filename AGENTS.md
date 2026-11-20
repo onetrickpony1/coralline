@@ -10,6 +10,9 @@ General rules are in the owner's dev-conventions. This file holds only this proj
 - `src-tauri/src/app.rs`: the window, file opening and the clipboard (arboard, HTML plus plain text). Behind the `app` feature.
 - `ui/app.js`: builds a JASP table model per table, renders it with JASP's code, runs `buildAPATable`, shows cards.
 - `ui/vendor/jasp/`: JASP's own results-page code, copied by `tools/sync-jasp-js.sh`.
+- `ui/app.css`: the liquid glass look. Themes are token sets on `[data-theme]` (light, dark, pink); `ui/theme-boot.js` sets the saved theme before the first paint (the CSP forbids inline scripts). No purple gradients (owner's rule).
+- `ui/icon.svg`: the icon (psi whose stem ends in the J of JASP), hand-written SVG. `tools/make-icons.sh` renders it to `src-tauri/icons/`.
+- `ui/fonts/`: Inter (OFL, licence alongside), vendored so the app works offline.
 
 ## Rules
 

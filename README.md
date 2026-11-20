@@ -14,6 +14,16 @@ jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results
 - **What only you can add is highlighted:** a vague title, a missing heading or an unclear abbreviation is marked in yellow in the pasted table, and listed under each table in the app.
 - **Fits the page:** column widths are measured so nothing wraps, and wide tables step down to a smaller type size.
 
+In the app:
+
+- **Light, dark and pink themes**, or follow the system.
+- **Reloads when JASP saves the file**, keeping your place.
+- **Find and filter:** search tables by name, or show only the ones still to do or ready to paste. A ring shows how many are ready.
+- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns.
+- **Number the first table** to match your paper (start at Table 4 if three tables come before).
+- **Jump to each highlight** by clicking the to-do under a table. Hide highlights in the preview to check the layout (copies keep them).
+- **Recent files**, preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>).
+
 ## Install
 
 There are no releases yet. Build it from source (see Development).
@@ -22,15 +32,15 @@ There are no releases yet. Build it from source (see Development).
 
 1. Save your work in JASP.
 2. Open the `.jasp` file in jAPAsp: drop it on the window, or click **Open JASP file**. You can also start it with a file: `japasp-tool results.jasp`.
-3. Click **Copy APA table** on a table, then paste it into your document.
+3. Click **Copy APA table** on a table (or press <kbd>C</kbd>; <kbd>J</kbd> and <kbd>K</kbd> move between tables), then paste it into your document.
 4. Fix what is highlighted in yellow, then remove the highlight.
 
 To see a file's tables as JSON instead: `japasp-tool --json results.jasp`.
 
 ## Notes
 
-- Only what is saved in the file is shown. Run your analyses and save again in JASP to update it.
-- Tables are numbered in the order they appear in the file. Renumber them to match your paper.
+- Only what is saved in the file is shown. Save again in JASP and the app reloads the tables by itself.
+- Tables are numbered in the order they appear in the file, from the number set in the menu.
 - The same APA copy is being proposed for JASP itself, as a "Copy APA Table" menu entry. The code in `ui/vendor/jasp` is shared with that change.
 
 ## Development
