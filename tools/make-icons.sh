@@ -14,7 +14,7 @@ variant() {
 	rsvg-convert -w 256 -h 256 "$root/ui/icons/icon-$name.svg" -o "$out/variants/$name.png"
 }
 variant blue "#4f8dff" "#2f62ea" "#1d45c4"
-variant dark "#34363c" "#1b1c20" "#0b0c0e"
+variant dark "#5a5e68" "#383b43" "#212329"
 variant pink "#ff8fbb" "#ec4d8e" "#c92a6c"
 
 # Bundle icons (installers, file managers): the blue version
