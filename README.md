@@ -2,38 +2,6 @@
 
 jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results table in it into an APA 7 table. Click **Copy APA table** and paste into Word or Google Docs. The tables are drawn by JASP's own code, so they show the same values JASP does. Your JASP file is only read, never changed.
 
-![jAPAsp with the Album Sales example open](docs/screenshot.png)
-
-## What it does for you
-
-- Rounds every number the APA way and puts symbols like *M*, *SD* and *p* in italics.
-- Draws the table with APA's lines, adds "Table 1" and the *Note.* under it, with your sample size.
-- Marks in yellow the few things only you can add, such as a title that says what was measured, and shows you how.
-- Shows exactly what it changed, so you can check it: your results stay the same as in JASP.
-
-## Features
-
-- **APA 7 layout:** "Table N" in bold, an italic title in title case, horizontal rules only, a *Note.* under the table.
-- **APA numbers:** 2 decimals, 3 for *p* values, no leading zero for statistics that can't exceed 1, commas in thousands, whole-number *df* where the *df* is whole.
-- **APA wording:** sentence-case headings, *M*, *SD*, *SE* and the other standard symbols in italics, readable variable names ("FaceType" becomes "Face type").
-- **Sample size:** *N* goes in the note. It comes from what the analysis reports or, when its tables don't say, from the data saved in the file (rows that pass the filter with no missing values in the analysis's variables).
-- **Layouts APA expects:** descriptive statistics with variables in rows, correlation matrices with numbered columns and asterisks instead of *p* rows.
-- **What only you can add is highlighted:** a vague title, a missing heading or an unclear abbreviation is marked in yellow in the pasted table. Under each table, click a to-do for what to write, with an example, and how to remove the yellow afterwards.
-- **Fits the page:** column widths are measured so nothing wraps, and wide tables step down to a smaller type size.
-
-In the app:
-
-- **Only the tables for your report:** assumption checks (normality, equal variances) start out of the numbering, and you can leave out or put back any table. The tables after it are renumbered. Two descriptives tables with the same numbers are pointed out.
-- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns. The list shows which tables you've copied, remembers it for next time, and says what's still to do in your document. If a copied table gets a new number or new values, it asks you to copy it again.
-- **See what changed:** **What changed** on each table (or <kbd>W</kbd>) lists every APA 7 rule that changed something, with each value before and after ("Std. Deviation" to *SD*, "0.3967" to ".40") and the APA section it comes from.
-- **Reloads when JASP saves the file**, keeping your place. If the file can't be read, it says so and keeps trying.
-- **Find and filter:** search tables by name, number ("table 3") or a variable in them ("adverts"), or show only the tables still to copy.
-- **Number the first table** to match your paper (start at Table 4 if three tables come before). Each file remembers its own.
-- **Light, dark and pink themes**, or follow the system. Works in a narrow window too: the table list opens as a drawer.
-- **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
-- **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in (needs a free GitHub account).
-- **Recent files** (also in the menu once a file is open), preview size, and keyboard shortcuts for everything (press <kbd>F1</kbd>). Single-key shortcuts can be turned off in the menu, for screen readers.
-
 ## Install
 
 **Windows** (10 or 11): download [install.cmd](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/install.cmd) and double-click it. Windows warns about apps from small developers that few people have downloaded yet: choose **Run** (or **More info**, then **Run anyway**). Run it again whenever you want to update.
@@ -55,6 +23,55 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/one
 - Windows: jAPAsp goes in `%LOCALAPPDATA%\Programs\japasp`, with a Start menu entry.
 - Linux: jAPAsp goes in `~/.local/share/japasp`, with an app menu entry and the `japasp` command in `~/.local/bin`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch); the installer tells you if it's missing.
 - macOS: installed like on Linux, started with `japasp`.
+
+## Before you use it
+
+jAPAsp is a formatting helper. It saves you the fiddly work of making JASP's tables look the way APA 7 asks. It doesn't do your statistics or your thinking for you.
+
+**What it does**
+
+- Takes the tables JASP has already made and lays them out in APA 7 style: the lines, the rounding, the italics, the "Table 1" above and the *Note.* below, with your sample size.
+- Keeps your results as they are. The numbers are JASP's own, only rounded the APA way. Your JASP file is never changed.
+- Shows you every change it made, so you can check it.
+- Highlights the few things it can't know, like a good title for your table, and tells you what to write.
+- Works on your own computer. Your file isn't uploaded anywhere.
+
+**What it doesn't do**
+
+- It doesn't check your analysis. If you picked the wrong test or your data has a mistake, you'll get a neat table with the wrong results in it.
+- It doesn't explain your results or write them up. It won't tell you what a result means or whether it matters.
+- It doesn't pick which tables belong in your report. That's your choice.
+- It doesn't do graphs or plots yet. Only tables.
+- It only sees what you've saved in JASP. Save in JASP first, or your newest results won't be there.
+- It doesn't know your course's own rules. If your tutor or marking guide asks for something different from APA 7, do what they say.
+- It can't promise a perfect table every time. Look over every table before you hand your work in. It's still your work.
+
+If you aren't sure whether tools like this are allowed on your course, ask your tutor. jAPAsp is made by one person. It isn't made by the JASP team or by the APA.
+
+![jAPAsp with the Album Sales example open](docs/screenshot.png)
+
+## Features
+
+- **APA 7 layout:** "Table N" in bold, an italic title in title case, horizontal rules only, a *Note.* under the table.
+- **APA numbers:** 2 decimals, 3 for *p* values, no leading zero for statistics that can't exceed 1, commas in thousands, whole-number *df* where the *df* is whole.
+- **APA wording:** sentence-case headings, *M*, *SD*, *SE* and the other standard symbols in italics, readable variable names ("FaceType" becomes "Face type").
+- **Sample size:** *N* goes in the note. It comes from what the analysis reports or, when its tables don't say, from the data saved in the file (rows that pass the filter with no missing values in the analysis's variables).
+- **Layouts APA expects:** descriptive statistics with variables in rows, correlation matrices with numbered columns and asterisks instead of *p* rows.
+- **What only you can add is highlighted:** a vague title, a missing heading or an unclear abbreviation is marked in yellow in the pasted table. Under each table, click a to-do for what to write, with an example, and how to remove the yellow afterwards.
+- **Fits the page:** column widths are measured so nothing wraps, and wide tables step down to a smaller type size.
+
+In the app:
+
+- **Only the tables for your report:** assumption checks (normality, equal variances) start out of the numbering, and you can leave out or put back any table. The tables after it are renumbered. Two descriptives tables with the same numbers are pointed out.
+- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns. The list shows which tables you've copied, remembers it for next time, and says what's still to do in your document. If a copied table gets a new number or new values, it asks you to copy it again.
+- **See what changed:** **What changed** on each table (or <kbd>W</kbd>) lists every APA 7 rule that changed something, with each value before and after ("Std. Deviation" to *SD*, "0.3967" to ".40") and the APA section it comes from.
+- **Reloads when JASP saves the file**, keeping your place. If the file can't be read, it says so and keeps trying.
+- **Find and filter:** search tables by name, number ("table 3") or a variable in them ("adverts"), or show only the tables still to copy.
+- **Number the first table** to match your paper (start at Table 4 if three tables come before). Each file remembers its own.
+- **Light, dark, pink and green themes** (green is JASP's own), or follow the system. Works in a narrow window too: the table list opens as a drawer.
+- **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
+- **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in (needs a free GitHub account).
+- **Recent files** (also in the menu once a file is open), preview size, and keyboard shortcuts for everything (press <kbd>F1</kbd>). Single-key shortcuts can be turned off in the menu, for screen readers.
 
 ## Use
 
