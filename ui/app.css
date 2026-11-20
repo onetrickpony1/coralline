@@ -732,3 +732,4 @@ body.dragging .dropping { opacity: 1; }
 .menu .row.stack { flex-direction: column; align-items: stretch; gap: 6px; }
 .menu .row.stack .icon-choice button { flex: 1; }
 .icon-choice button { white-space: nowrap; }
+.menu .row.stack .icon-choice button[data-icon-choice="theme"] { flex: 0 0 auto; padding: 0 11px; }  /* the text needs its own width; the icons share the rest */

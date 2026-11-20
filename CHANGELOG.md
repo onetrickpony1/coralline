@@ -19,6 +19,7 @@
 - **The command is now `japasp`** (it was `japasp-tool`). Your theme, recent files and other settings move over by themselves the first time the new version starts. `japasp --version` prints the version.
 
 ### Fixes
+- **"Match theme" fits its button.** In the menu's App icon choice, the "Match theme" label ran past the edges of its highlighted box; the button now takes the width its text needs.
 - **One yellow.** The to-do bubbles under each table are the same glass as the other buttons, with the sidebar's pulsing yellow dot instead of a yellow fill; the flash when jumping to a highlight uses that yellow too. Highlights inside the tables stay bright yellow, as they paste.
 - **Smooth status dots.** The dots next to each table in the sidebar had jagged, pixelated edges; they are now drawn smooth, and the yellow ones (still to do) pulse gently. Reduce effects stops the pulse.
 - **Correlation tables with confidence intervals follow APA.** Each interval goes in square brackets under its *r* (".24 [−.10, .54]") instead of separate Lower and Upper rows, with a note saying so. Correlations show two decimals (a third only for values under .01), the copy uses true minus signs, and JASP's significance note becomes "*p < .05. **p < .01. ***p < .001."
