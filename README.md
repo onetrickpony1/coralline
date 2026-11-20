@@ -27,43 +27,40 @@ In the app:
 
 ## Install
 
-There are no releases yet. Build it from source (see Development).
+**Windows** (10 or 11):
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.ps1 | iex"
+```
+
+**Linux / macOS**:
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.sh | sh
+```
+
+Run the same line again to update. You can also download `install.cmd` (Windows) or `install.command` (macOS) and double-click it.
+
+- Windows: jAPAsp goes in `%LOCALAPPDATA%\Programs\japasp`, with a Start menu entry. It uses the WebView2 runtime that comes with Windows.
+- Linux: jAPAsp goes in `~/.local/share/japasp`, with an app menu entry and the `japasp` command in `~/.local/bin`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch); the installer tells you if it's missing.
+- macOS: installed like on Linux, started with `japasp`. It is built for macOS but not tested there.
 
 ## Use
 
 1. Save your work in JASP.
-2. Open the `.jasp` file in jAPAsp: drop it on the window, or click **Open JASP file**. You can also start it with a file: `japasp-tool results.jasp`.
+2. Open the `.jasp` file in jAPAsp: drop it on the window, or click **Open JASP file**. You can also start it with a file: `japasp results.jasp`.
 3. Click **Copy APA table** on a table (or press <kbd>C</kbd>; <kbd>J</kbd> and <kbd>K</kbd> move between tables), then paste it into your document.
 4. Fix what is highlighted in yellow, then remove the highlight.
 
-To see a file's tables as JSON instead: `japasp-tool --json results.jasp`.
+To see a file's tables as JSON instead: `japasp --json results.jasp`.
 
 ## Notes
 
 - Only what is saved in the file is shown. Save again in JASP and the app reloads the tables by itself.
 - Tables are numbered in the order they appear in the file, from the number set in the menu.
 - **Limitation:** means, *SD*s and similar values always keep the zero before the decimal point (0.45), as APA asks for statistics that can be greater than 1. For a variable that can't go above 1, such as a proportion from 0 to 1, APA's rule would also allow .45, but the app can't tell a variable's limits from the file. Remove those zeros by hand if you want them gone.
-- The same APA copy is being proposed for JASP itself, as a "Copy APA Table" menu entry. The code in `ui/vendor/jasp` is shared with that change.
-
-## Development
-
-You need Rust (stable) and, on Linux, WebKitGTK 4.1 (`webkit2gtk-4.1` on Arch, `libwebkit2gtk-4.1-dev` on Debian and Ubuntu).
-
-```sh
-cd src-tauri
-cargo run --release -- path/to/file.jasp     # the app
-cargo test --no-default-features             # the .jasp reader, no WebKit needed
-../tests/ui/run.sh                           # the APA tables, in headless Chrome
-```
-
-`tests/ui/run.sh` uses JSON dumps in `tests/ui/fixtures/`, made with `japasp-tool --json`. They aren't in the repo.
-
-The corpus check runs every table in JASP's Data Library through the copier and checks it: no crashes, every number of JASP's in the copy, APA *p* values, no exponents outside Bayes factors, every column headed, *N* from the tables matching *N* from the data.
-
-```sh
-tests/corpus/dump.sh     # JSON from the installed JASP's Data Library (or a folder of .jasp files)
-tests/corpus/run.sh      # summary in the terminal, details in tests/corpus/report.html
-```
+- The APA code sits in JASP's own results-page code (`ui/vendor/jasp`), so the tables come out as JASP draws them.
+- Building from source and the tests: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## License
 

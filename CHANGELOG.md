@@ -15,6 +15,8 @@
 - **A range when each test has its own N.** With missing values handled per variable or pair (t-tests, paired tests, pairwise correlations), the note says "*N*s range from 8 to 9 because of missing values" instead of asking you.
 - **Sample size the way APA's sample tables do it.** Meta-analyses say "Number of studies = 18, total *N* = 2,899" (and the number of effects for multilevel models) instead of a wrong *N*. Tables that show their own sample, tables without numbers and audit settings no longer ask for one. Binomial summary data gets *N* = successes + failures, and JAGS models use their own *n*.
 - **See exactly what was changed.** A **What changed** button on each table (or <kbd>W</kbd>) lists every rule that changed something, why APA 7 asks for it, and each value before and after, compared with the table as JASP shows it: decimals, leading zeros, abbreviations, italics, headings, notes, the title and the layout.
+- **One-line install and updates.** Install with one line on Windows, Linux or macOS (see the README); run it again to update. On Linux it adds jAPAsp to the app menu.
+- **The command is now `japasp`** (it was `japasp-tool`). Your theme, recent files and other settings move over by themselves the first time the new version starts. `japasp --version` prints the version.
 
 ### Fixes
 - **One yellow.** The to-do bubbles under each table are the same glass as the other buttons, with the sidebar's pulsing yellow dot instead of a yellow fill; the flash when jumping to a highlight uses that yellow too. Highlights inside the tables stay bright yellow, as they paste.
