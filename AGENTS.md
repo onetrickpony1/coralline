@@ -11,7 +11,7 @@ General rules are in the owner's dev-conventions. This file holds only this proj
 - `ui/app.js`: builds a JASP table model per table, renders it with JASP's code, runs `buildAPATable`, shows cards.
 - `ui/vendor/jasp/`: JASP's own results-page code, copied by `tools/sync-jasp-js.sh`.
 - `ui/app.css`: the liquid glass look. Themes are token sets on `[data-theme]` (light, dark, pink); `ui/theme-boot.js` sets the saved theme before the first paint (the CSP forbids inline scripts). No purple gradients (owner's rule). Performance rule: no `filter: blur` or animated backgrounds, `backdrop-filter` only on panes floating over content (menu, dialog), no masks on `.tables`; it must stay smooth on a basic laptop. `.reduced` (Reduce effects) turns off transparency, shadows and animation.
-- `ui/icon.svg`: the icon (psi whose stem ends in the J of JASP), hand-written SVG. `tools/make-icons.sh` renders it to `src-tauri/icons/`.
+- `ui/icon.svg`: the icon (psi whose stem ends in the J of JASP), hand-written SVG. `tools/make-icons.sh` renders it to `src-tauri/icons/`, plus the dark and pink versions (`ui/icons/`, `src-tauri/icons/variants/`). The window reports app id `japasp-tool`; on Linux `set_app_icon` writes `~/.local/share/applications/japasp-tool.desktop` and the icon PNG in `~/.local/share/japasp-tool/`.
 - `ui/fonts/`: Inter (OFL, licence alongside), vendored so the app works offline.
 
 ## Rules

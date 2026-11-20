@@ -40,7 +40,9 @@
 		highlights: settings.read("highlights", true),
 		autoReload: settings.read("autoReload", true),
 		start: settings.read("start", 1),
-		reduced: root.classList.contains("reduced"),   // set by theme-boot.js before the first paint
+		reduced: root.classList.contains("reduced"),
+		appIcon: settings.read("appIcon", "theme"),   // "theme", or a fixed "blue", "dark" or "pink"
+		shownIcon: null,   // set by theme-boot.js before the first paint
 		recent: settings.read("recent", [])
 	};
 
@@ -138,7 +140,25 @@
 		root.setAttribute("data-theme", resolved);
 		for (const button of document.querySelectorAll("[data-theme-choice]"))
 			button.setAttribute("aria-checked", String(button.dataset.themeChoice === state.theme));
+		applyIcon();
 	}
+	// The icon follows the theme (light: blue, dark: dark grey, pink: pink) unless one is chosen in the menu
+	function applyIcon() {
+		const theme = root.getAttribute("data-theme");
+		const variant = state.appIcon !== "theme" ? state.appIcon : theme === "dark" ? "dark" : theme === "pink" ? "pink" : "blue";
+		for (const button of document.querySelectorAll("[data-icon-choice]"))
+			button.setAttribute("aria-checked", String(button.dataset.iconChoice === state.appIcon));
+		if (variant === state.shownIcon)
+			return;
+		state.shownIcon = variant;
+		const src = "icons/icon-" + variant + ".svg";
+		for (const img of document.querySelectorAll("img[data-app-icon]"))
+			img.src = src;
+		$id("favicon").href = src;
+		if (tauri)
+			tauri.core.invoke("set_app_icon", { variant: variant }).catch(function (e) { console.warn("app icon:", e); });
+	}
+
 	function setTheme(theme) {
 		state.theme = theme;
 		settings.write("theme", theme);
@@ -707,6 +727,12 @@
 
 	for (const button of document.querySelectorAll("[data-theme-choice]"))
 		button.addEventListener("click", function () { setTheme(this.dataset.themeChoice); });
+	for (const button of document.querySelectorAll("[data-icon-choice]"))
+		button.addEventListener("click", function () {
+			state.appIcon = this.dataset.iconChoice;
+			settings.write("appIcon", state.appIcon);
+			applyIcon();
+		});
 	for (const button of document.querySelectorAll("[data-filter]"))
 		button.addEventListener("click", function () { state.filter = this.dataset.filter; applyFilter(); });
 

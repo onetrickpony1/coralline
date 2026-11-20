@@ -30,6 +30,6 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
 
-tauri = { version = "2", features = [], optional = true }
+tauri = { version = "2", features = ["image-png"], optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"], optional = true }

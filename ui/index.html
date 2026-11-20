@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jAPAsp</title>
-<link rel="icon" href="icon.svg">
+<link rel="icon" id="favicon" href="icon.svg">
 <script src="theme-boot.js"></script>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 
 <header class="titlebar glass">
-	<div class="brand"><img src="icon.svg" alt="" width="28" height="28"><span>jAPAsp</span></div>
+	<div class="brand"><img data-app-icon src="icon.svg" alt="" width="28" height="28"><span>jAPAsp</span></div>
 
 	<div class="file" id="filePill" hidden>
 		<span class="file-name" id="fileName"></span>
@@ -47,6 +47,14 @@
 		<label class="row"><span>Number the first table</span><input id="startNumber" type="number" min="1" max="999" value="1" inputmode="numeric"></label>
 		<label class="row switch"><span>Show highlights in the preview<small>Copies always keep them</small></span><input id="showHighlights" type="checkbox" checked><i></i></label>
 		<label class="row switch"><span>Reload when JASP saves<small>Checks the file every 2 seconds</small></span><input id="autoReload" type="checkbox" checked><i></i></label>
+		<div class="row stack"><span>App icon</span>
+			<div class="icon-choice" role="radiogroup" aria-label="App icon">
+				<button type="button" role="radio" data-icon-choice="theme" title="Match the theme">Match theme</button>
+				<button type="button" role="radio" data-icon-choice="blue" title="Always blue" aria-label="Always blue"><img src="icons/icon-blue.svg" alt="" width="22" height="22"></button>
+				<button type="button" role="radio" data-icon-choice="dark" title="Always dark" aria-label="Always dark"><img src="icons/icon-dark.svg" alt="" width="22" height="22"></button>
+				<button type="button" role="radio" data-icon-choice="pink" title="Always pink" aria-label="Always pink"><img src="icons/icon-pink.svg" alt="" width="22" height="22"></button>
+			</div>
+		</div>
 		<label class="row switch"><span>Reduce effects<small>For slower computers: no transparency or animation</small></span><input id="reduceEffects" type="checkbox"><i></i></label>
 		<div class="row"><span>Preview size</span>
 			<div class="stepper"><button type="button" data-action="zoom-out" aria-label="Smaller">−</button><output id="zoomLabel">100%</output><button type="button" data-action="zoom-in" aria-label="Larger">+</button></div>
@@ -59,7 +67,7 @@
 <main id="main">
 	<section class="empty" id="empty">
 		<div class="well glass" id="drop">
-			<img class="well-icon" src="icon.svg" alt="" width="112" height="112">
+			<img data-app-icon class="well-icon" src="icon.svg" alt="" width="112" height="112">
 			<h1>Open a saved JASP file</h1>
 			<p>Each results table becomes an APA 7 table you can paste into Word or Google Docs. Anything only you can fill in comes highlighted.</p>
 			<button class="btn primary big" id="openButton2" type="button">Open JASP file</button>
@@ -88,7 +96,7 @@
 	</div>
 </main>
 
-<div class="dropping" aria-hidden="true"><div class="glass"><img src="icon.svg" alt="" width="64" height="64"><span>Drop to open</span></div></div>
+<div class="dropping" aria-hidden="true"><div class="glass"><img data-app-icon src="icon.svg" alt="" width="64" height="64"><span>Drop to open</span></div></div>
 <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
 
 <dialog class="keys" id="keys" aria-labelledby="keysTitle">

@@ -43,6 +43,59 @@ fn copy_apa(html: String, text: String, state: State<Clipboard>) -> Result<(), S
     with_clipboard(&state, |c| c.set_html(html, Some(text)))
 }
 
+/// The app icon in each colour: blue (light theme), dark grey (dark theme), pink (pink theme)
+fn icon_png(variant: &str) -> &'static [u8] {
+    match variant {
+        "dark" => include_bytes!("../icons/variants/dark.png"),
+        "pink" => include_bytes!("../icons/variants/pink.png"),
+        _ => include_bytes!("../icons/variants/blue.png"),
+    }
+}
+
+/// Shows the icon in the chosen colour: on the window (taskbars on Windows and X11) and, on Linux, in the
+/// app's desktop entry, which is where Wayland taskbars look.
+#[tauri::command]
+fn set_app_icon(variant: String, window: tauri::Window) -> Result<(), String> {
+    let png = icon_png(&variant);
+    let image = tauri::image::Image::from_bytes(png).map_err(|e| e.to_string())?;
+    window.set_icon(image).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    desktop_entry(&variant, png).map_err(|e| format!("couldn't update the desktop entry: {e}"))?;
+    Ok(())
+}
+
+/// Writes ~/.local/share/applications/japasp-tool.desktop (named after the app id the window reports, so
+/// Wayland taskbars find it) with the icon in the chosen colour. Files are only rewritten when they change.
+#[cfg(target_os = "linux")]
+fn desktop_entry(variant: &str, png: &[u8]) -> std::io::Result<()> {
+    let data = match std::env::var_os("XDG_DATA_HOME") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(std::env::var_os("HOME").ok_or_else(|| std::io::Error::other("no home folder"))?).join(".local/share"),
+    };
+    let icons = data.join("japasp-tool");
+    std::fs::create_dir_all(&icons)?;
+    let icon = icons.join(format!("icon-{variant}.png"));
+    write_if_changed(&icon, png)?;
+
+    let exe = std::env::current_exe()?;
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName=jAPAsp\nComment=Copy JASP tables as APA 7 tables\nExec=\"{}\" %f\nIcon={}\nTerminal=false\nCategories=Education;Science;\nStartupWMClass=japasp-tool\n",
+        exe.display(),
+        icon.display()
+    );
+    let apps = data.join("applications");
+    std::fs::create_dir_all(&apps)?;
+    write_if_changed(&apps.join("japasp-tool.desktop"), entry.as_bytes())
+}
+
+#[cfg(target_os = "linux")]
+fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if std::fs::read(path).map(|old| old == bytes).unwrap_or(false) {
+        return Ok(());
+    }
+    std::fs::write(path, bytes)
+}
+
 /// Plain text only (tab-separated), for spreadsheets and plain editors
 #[tauri::command]
 fn copy_text(text: String, state: State<Clipboard>) -> Result<(), String> {
@@ -98,7 +151,7 @@ pub fn run(file: Option<PathBuf>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(Clipboard(Mutex::new(None)))
         .manage(InitialFile(Mutex::new(file)))
-        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa, copy_text, file_stamp])
+        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa, copy_text, file_stamp, set_app_icon])
         .run(tauri::generate_context!())
         .expect("the app window couldn't start");
 }
