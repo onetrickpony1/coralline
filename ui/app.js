@@ -1502,8 +1502,11 @@
 		const mod = e.ctrlKey || e.metaKey;
 		const key = e.key;
 
-		if ($id("keys").open)
-			return;  // the shortcuts window handles its own keys (Esc closes it)
+		if ($id("keys").open) {
+			// F1 (or ?) again closes it, like Esc; the window handles its other keys
+			if (key === "F1" || (key === "?" && state.singleKeys)) { e.preventDefault(); closeKeys(); }
+			return;
+		}
 		if (key === "Escape") {
 			if (!menu.hidden) { toggleMenu(false); menuButton.focus(); return; }
 			if (isNarrow() && $id("layout").classList.contains("drawer-open")) { setDrawer(false); return; }

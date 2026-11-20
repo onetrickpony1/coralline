@@ -58,7 +58,7 @@
 - **Analyses with the same name are numbered** ("Linear Regression (2)"); the list shows the tidied table titles, with the full title on hover.
 - **Files with only plots** say so, instead of "no results tables".
 - **No match** says which filter is on and offers Clear search and Show all tables.
-- **The shortcuts list opens with <kbd>F1</kbd>**, which works on any keyboard, and rises in with a short animation; <kbd>?</kbd> needed Shift, and / alone starts a search.
+- **The shortcuts list opens with <kbd>F1</kbd>**, which works on any keyboard, rises in with a short animation and closes with F1 again; <kbd>?</kbd> needed Shift, and / alone starts a search.
 - Caps Lock no longer turns off <kbd>C</kbd>, and shortcuts don't fire behind the keyboard shortcuts window.
 - The "!" on the reload button, which looked like an error, is gone; its tooltip says when the file isn't being watched and where to turn that on.
 - Easier to read and use with a keyboard or screen reader: grey text has at least 4.5:1 contrast, the list's dots and ticks have text for screen readers, arrow keys move between theme, filter and icon choices, and the menu is announced as a set of options.
