@@ -1291,6 +1291,12 @@ function apaTidyLabel(text, isFirst) {
 	 * "sales" -> "Sales". Abbreviations written in lower case without vowels ("drp") can't be guessed and are returned
 	 * in `unclear` so they can be highlighted.
 	 */
+	// Pairs and paths ("Revise – Exam", "Framing → Justification"): each side is a name of its own
+	let pair = text.split(/( \u2013 | \u2192 )/);
+	if (pair.length > 1) {
+		let parts = pair.map(function (part, i) { return i % 2 === 1 ? { text: part, unclear: [] } : apaTidyLabel(part, i === 0 ? isFirst : true); });
+		return { text: parts.map(function (p) { return p.text; }).join(""), unclear: [].concat(...parts.map(function (p) { return p.unclear; })) };
+	}
 	let unclear = [];
 	let prefix = "";
 	let numbered = text.match(/^(\s*\d+\.\s+)([\s\S]*)$/);  // "1. sales" in correlation matrices
@@ -1469,6 +1475,119 @@ function _apaTransposeDescriptives(table) {
 	$table.children("thead").empty().append(head);
 	$table.children("tbody").empty().append(body);
 	return { turned: true, n: n };
+}
+
+function _apaStatisticColumn(table) {
+	// Contingency tables label each row's statistic in an unheaded column ("Count", "Expected count"). With one
+	// statistic the column says nothing and goes; with several it is headed "Statistic".
+	let $table = $(table);
+	let headRows = $table.children("thead").children("tr").toArray();
+	let bodyRows = $table.children("tbody").children("tr").toArray();
+	if (headRows.length === 0 || bodyRows.length === 0)
+		return;
+	let layout = _apaGrid(headRows.concat(bodyRows));
+	let headLast = headRows.length - 1;
+	let width = Math.max(0, ...layout.grid.map(function (row) { return row.length; }));
+	let isStatistic = /^(Count|Expected count|% within (row|column)|% of total|Residuals?|Standardized residuals?|Pearson residuals?)$/i;
+	for (let c = 1; c < width; c++) {
+		let head = layout.grid[headLast][c];
+		if (!head || _apaPlain(head.innerHTML) !== "" || head.colSpan !== 1)
+			continue;
+		let column = layout.placed.filter(function (item) { return item.col <= c && c < item.col + item.colSpan; });
+		// Empty headings above may span into the column; everything from the heading row down must be its own
+		if (column.some(function (item) { return item.colSpan !== 1 && (item.row >= headLast || _apaPlain(item.cell.innerHTML) !== ""); }))
+			continue;
+		let labels = column.filter(function (item) { return item.row > headLast; }).map(function (item) { return _apaLabel(item.cell); });
+		if (labels.length === 0 || !labels.every(function (label) { return isStatistic.test(label); }))
+			continue;
+		if (labels.every(function (label) { return label === labels[0]; }))
+			column.forEach(function (item) {
+				if (item.colSpan > 1)
+					item.cell.colSpan = item.colSpan - 1;
+				else
+					item.cell.remove();
+			});
+		else
+			head.textContent = "Statistic";
+		return;
+	}
+}
+
+function _apaMergePairColumns(table) {
+	// JASP shows pairs and paths over three columns without headings: "Revise | - | Exam", "Framing | → | Justification".
+	// APA wants every column headed, and the pair is one entry: it becomes one stub column, "Revise – Exam" under
+	// "Variables", "Framing → Justification" under "Path". Returns true when it merged.
+	let $table = $(table);
+	let headRows = $table.children("thead").children("tr").toArray();
+	let bodyRows = $table.children("tbody").children("tr").toArray();
+	if (headRows.length === 0 || bodyRows.length === 0)
+		return false;
+	let rows = headRows.concat(bodyRows);
+	let layout = _apaGrid(rows);
+	let headLast = headRows.length - 1;
+	let text = function (r, c) { let cell = layout.grid[r] && layout.grid[r][c]; return cell ? _apaPlain(cell.innerHTML) : ""; };
+	if (text(headLast, 0) !== "" || text(headLast, 1) !== "" || text(headLast, 2) !== "")
+		return false;
+	let separators = [];
+	for (let r = headRows.length; r < rows.length; r++)
+		separators.push(text(r, 1));
+	let arrow = separators.every(function (s) { return s === "→"; });
+	let dash = separators.every(function (s) { return /^[-–−]$/.test(s); });
+	if (!arrow && !dash)
+		return false;
+	// Longer paths go on: "A → B → C" uses two more unheaded columns per step, empty on shorter rows
+	let width = Math.max(0, ...layout.grid.map(function (row) { return row.length; }));
+	let last = 2;
+	while (arrow && last + 2 < width && text(headLast, last + 1) === "" && text(headLast, last + 2) === "") {
+		let step = true;
+		for (let r = headRows.length; r < rows.length; r++)
+			if (!/^(→)?$/.test(text(r, last + 1)) || (text(r, last + 1) === "") !== (text(r, last + 2) === ""))
+				step = false;
+		if (!step)
+			break;
+		last += 2;
+	}
+	let span = last + 1;
+	// The three columns must be plain in the body: no cell reaching past them sideways
+	let touches = layout.placed.filter(function (item) { return item.col < span; });
+	if (touches.some(function (item) { return item.row >= headRows.length && (item.colSpan > 1 || item.col + item.colSpan > span); }))
+		return false;
+
+	// Body: one cell per row with the whole pair, written out on every row
+	for (let r = headRows.length; r < rows.length; r++) {
+		let cell = document.createElement("td");
+		cell.className = "text";
+		let names = [];
+		for (let c = 0; c <= last; c += 2)
+			if (text(r, c) !== "")
+				names.push(text(r, c));
+		cell.textContent = names.join(arrow ? " → " : " – ");
+		for (let c = 0; c < span; c++) {
+			let old = layout.grid[r][c];
+			if (old && old.parentNode)
+				old.remove();
+		}
+		rows[r].insertBefore(cell, rows[r].firstChild);
+	}
+	// Headings: the bottom row gets the stub heading; cells above lose the two columns
+	for (let r = 0; r < headRows.length; r++) {
+		let seen = [];
+		for (let c = 0; c < span; c++) {
+			let cell = layout.grid[r][c];
+			if (!cell || seen.indexOf(cell) !== -1)
+				continue;
+			seen.push(cell);
+			let inside = Math.min(span, layout.placed.find(function (i) { return i.cell === cell; }).col + cell.colSpan) - Math.max(0, layout.placed.find(function (i) { return i.cell === cell; }).col);
+			if (cell.colSpan > inside)
+				cell.colSpan = cell.colSpan - inside + (c === 0 ? 1 : 0);
+			else if (c > 0 || seen.length > 1)
+				cell.remove();
+		}
+		let first = layout.grid[r][0];
+		if (first && first.parentNode && r === headLast)
+			first.textContent = arrow ? "Path" : "Variables";
+	}
+	return true;
 }
 
 function _apaCorrelationSampleRows(table) {
@@ -1686,6 +1805,8 @@ function buildAPATable(tableElement, info, tableNumber) {
 	$table.find("div.over-title-space").each(function () { $(this).replaceWith(this.childNodes); });
 
 	let turned = /^Descriptive Statistics/i.test(_apaPlain(info.title)) ? _apaTransposeDescriptives(table) : { turned: false };
+	_apaMergePairColumns(table);
+	_apaStatisticColumn(table);
 	let isCorrelationMatrix = _apaCorrelationMatrix(table);
 	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(_apaPlain(info.title)) || /Pearson|Spearman|Kendall/.test(table.textContent));
 	let starsNote = isCorrelationMatrix ? _apaCorrelationStars(table) : null;
@@ -1789,9 +1910,24 @@ function buildAPATable(tableElement, info, tableNumber) {
 		let headed = layout.placed.some(function (item) { return item.row < headRows.length && item.col <= c && c < item.col + item.colSpan && _apaPlain(item.cell.innerHTML) !== ""; });
 		let hasText = layout.placed.some(function (item) { return item.row >= headRows.length && item.col === c && /[\p{L}\d]/u.test(_apaPlain(item.cell.innerHTML)); });
 		let headCell = headLast >= 0 ? layout.grid[headLast][c] : null;
-		if (!headed && hasText && headCell && headCell.colSpan === 1 && c === 0 && /Descriptives|Descriptive Statistics/i.test(_apaPlain(info.title))) {
-			headCell.textContent = "Variable";  // descriptives list variables in the first column
-			continue;
+		if (!headed && hasText && headCell && headCell.colSpan === 1) {
+			// A heading APA would use, from what the column holds; "Variable" is APA's default for the first column
+			let labels = layout.placed.filter(function (item) { return item.row >= headRows.length && item.col === c; }).map(function (item) { return _apaLabel(item.cell); }).filter(function (l) { return l !== ""; });
+			let heading = null;
+			if (labels.some(function (l) { return /^\(Intercept\)$/.test(l); }))
+				heading = "Predictor";
+			else if (labels.some(function (l) { return /^(Residuals?|Within|Error)$/.test(l); }))
+				heading = "Source";
+			else if (labels.every(function (l) { return /^(Model\s*\d+|M[\d₀-₉]+)$/.test(l); }))
+				heading = "Model";
+			else if (/\bTests\b/.test(_apaPlain(info.title)) && c === 0)
+				heading = "Test";
+			else if (c === 0)
+				heading = "Variable";
+			if (heading) {
+				headCell.textContent = heading;
+				continue;
+			}
 		}
 		if (!headed && hasText && headCell && headCell.colSpan === 1) {
 			headCell.innerHTML = _apaTodo(i18n("Add heading"));
@@ -1831,6 +1967,14 @@ function buildAPATable(tableElement, info, tableNumber) {
 		let cells = layout.placed.filter(function (item) { return item.col === +c && item.row >= headRows.length; });
 		if (cells.every(function (item) { return /^(\d+([.,]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
 			cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d+)[.,]0+/, "$1"); }); });
+	}
+	// Rows of counts too ("Count" in contingency tables): whole numbers when every value is one
+	for (let r = headRows.length; r < allRows.length; r++) {
+		if (!layout.grid[r].some(function (cell) { return cell && /^(Count|n|N)$/.test(_apaLabel(cell)); }))
+			continue;
+		let cells = layout.placed.filter(function (item) { return item.row === r && !isTextCell(item) && !/^(Count|n|N)$/.test(_apaLabel(item.cell)); });
+		if (cells.every(function (item) { return /^(\d[\d,]*([.]0+)?)?$/.test(_apaPlain(item.cell.innerHTML)); }))
+			cells.forEach(function (item) { _apaReplaceText(item.cell, function (text) { return text.replace(/^(\s*\d[\d,]*)[.]0+/, "$1"); }); });
 	}
 	let groupThousands = /^en/.test(typeof currentLocaleId === "string" ? currentLocaleId : "en");
 	for (let item of layout.placed) {
@@ -1904,7 +2048,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 		notes.specific.push(starsNote);
 
 	// Explain the abbreviations used in the table, unless the notes already do
-	let tableText = _apaPlain(table.innerHTML);
+	let tableText = $(table).find("th, td").map(function () { return _apaPlain(this.innerHTML); }).get().join(" ");  // cell by cell, so words don't run together
 	let noteText = _apaPlain(notes.general.concat(notes.specific.map(function (n) { return n.text; })).join(" "));
 	let explained = [];
 	for (let abbreviation in apaAbbreviationMeanings) {
