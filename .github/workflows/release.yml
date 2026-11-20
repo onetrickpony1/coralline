@@ -1,0 +1,69 @@
+name: Release
+
+# Builds the program for each platform when a version tag (v1.2.3) is pushed, and adds the files to that
+# tag's GitHub release. install.sh and install.ps1 download them from the latest release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the release with this version's CHANGELOG section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## " v "( |$)" { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no section for $version"; exit 1; }
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "jAPAsp $version" --notes-file notes.md
+
+  build:
+    name: ${{ matrix.asset }}
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04   # the oldest supported Ubuntu, so the program runs on older distributions too
+            target: x86_64-unknown-linux-gnu
+            asset: japasp-linux-x86_64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: japasp-windows-x86_64.zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: japasp-macos-aarch64.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: japasp-macos-x86_64.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Linux libraries for the app window
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev
+      - name: Build
+        working-directory: src-tauri
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package (Linux, macOS)
+        if: runner.os != 'Windows'
+        run: tar -czf ${{ matrix.asset }} -C src-tauri/target/${{ matrix.target }}/release japasp
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path src-tauri/target/${{ matrix.target }}/release/japasp.exe -DestinationPath ${{ matrix.asset }}
+      - name: Add to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" ${{ matrix.asset }} --clobber
