@@ -33,15 +33,18 @@
 	--r-lg: 22px;   /* floating panels */
 	--r-md: 14px;   /* trays and menus */
 	--r-sm: 9px;    /* buttons and fields */
+	/* Nested corners are concentric: inner radius = outer radius - the gap between them */
+	--r-bar-inner: calc(var(--r-lg) - 8px);   /* controls in the title bar (8px padding) */
+	--r-tray: calc(var(--r-lg) - 10px);       /* the tray in a card (10px margin) */
 	--blur: blur(26px) saturate(185%);
 	--ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 :root, [data-theme="light"] {
 	--field: #dfe6f4;
-	--blob1: #8eb0ff;
-	--blob2: #ffd9b8;
-	--blob3: #9fe1d4;
+	--blob1: oklch(0.80 0.10 260);
+	--blob2: oklch(0.80 0.10 60);
+	--blob3: oklch(0.80 0.10 180);
 	--ink: #0f1b3d;
 	--ink-2: #4b5675;
 	--ink-3: #78819c;
@@ -65,14 +68,14 @@
 
 [data-theme="dark"] {
 	--field: #090d1b;
-	--blob1: #2742c4;
-	--blob2: #0e4f8f;
-	--blob3: #0b6e6c;
+	--blob1: oklch(0.42 0.14 265);
+	--blob2: oklch(0.42 0.14 235);
+	--blob3: oklch(0.42 0.14 190);
 	--ink: #eef1ff;
 	--ink-2: #a7b0cb;
 	--ink-3: #7a83a1;
-	--glass: rgba(26, 32, 56, 0.46);
-	--glass-solid: rgba(22, 27, 46, 0.94);
+	--glass: rgba(30, 37, 64, 0.5);
+	--glass-solid: rgba(48, 57, 90, 0.96);   /* raised surfaces are lighter: shadows barely show in the dark */
 	--edge: rgba(255, 255, 255, 0.15);
 	--edge-low: rgba(0, 0, 0, 0.35);
 	--hair: rgba(255, 255, 255, 0.09);
@@ -91,9 +94,9 @@
 
 [data-theme="pink"] {
 	--field: #fde6ef;
-	--blob1: #ff9cc3;
-	--blob2: #ffc6a6;
-	--blob3: #ffb3b3;
+	--blob1: oklch(0.82 0.11 355);
+	--blob2: oklch(0.82 0.11 50);
+	--blob3: oklch(0.82 0.11 20);
 	--ink: #4a0e2c;
 	--ink-2: #8a4466;
 	--ink-3: #b07390;
@@ -118,7 +121,7 @@
 /* ---- Base ---- */
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; height: 100dvh; }
 body {
 	margin: 0;
 	background: var(--field);
@@ -133,7 +136,7 @@ body {
 }
 /* Theme changes fade, but only once the app has started, so the first frame is never animated */
 .started body { transition: background-color 0.4s var(--ease), color 0.4s var(--ease); }
-svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 kbd {
 	font: 500 11px/1 var(--font);
@@ -206,6 +209,7 @@ kbd {
 .btn:active { transform: scale(0.97); }
 .btn.primary {
 	background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 86%, white) 0%, var(--accent) 55%, color-mix(in srgb, var(--accent) 70%, var(--accent-2)) 100%);
+	background: linear-gradient(in oklch 180deg, color-mix(in oklch, var(--accent) 86%, white) 0%, var(--accent) 55%, color-mix(in oklch, var(--accent) 70%, var(--accent-2)) 100%);
 	color: var(--on-accent);
 	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 14px -4px color-mix(in srgb, var(--accent) 70%, transparent);
 }
@@ -232,7 +236,7 @@ kbd {
 	align-items: center;
 	gap: 12px;
 	margin: 12px 12px 0;
-	padding: 8px 10px 8px 12px;
+	padding: 8px;
 	border-radius: var(--r-lg);
 	z-index: 20;
 	flex: none;
@@ -513,7 +517,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .card-head .t { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-head .actions { display: flex; gap: 6px; }
 
-.tray { margin: 0 10px 10px; padding: 18px; border-radius: var(--r-md); background: color-mix(in srgb, var(--field) 45%, transparent); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08); overflow-x: auto; }
+.tray { margin: 0 10px 10px; padding: 18px; border-radius: var(--r-tray); background: color-mix(in srgb, var(--field) 45%, transparent); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08); overflow-x: auto; }
 .paper {
 	background: #fff;
 	color: #000;
@@ -603,3 +607,25 @@ body.dragging .dropping { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* Title bar controls sit 8px from its edge, so their corners follow its curve */
+.titlebar > .btn, .titlebar > .icon-btn, .titlebar > .search, .titlebar > .themes { border-radius: var(--r-bar-inner); }
+.titlebar > .themes button { border-radius: calc(var(--r-bar-inner) - 3px); }
+.titlebar > .brand { padding-left: 4px; }
+[data-theme="dark"] .card.current { background: rgba(40, 48, 80, 0.62); }
+[data-theme="dark"] .tray { background: rgba(6, 9, 20, 0.45); }
+
+/* Scrolling lists fade at their edges instead of being cut */
+.side-list {
+	-webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 24px), transparent 100%);
+	mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 24px), transparent 100%);
+}
+.tables {
+	-webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 40px), transparent 100%);
+	mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 40px), transparent 100%);
+}
+
+/* Copy -> Copied: the label blurs out and the new one blurs in */
+.btn .swap { display: inline-flex; align-items: center; gap: 6px; transition: filter 0.14s var(--ease), opacity 0.14s var(--ease), transform 0.14s var(--ease); }
+.btn .swap.out { filter: blur(4px); opacity: 0; transform: scale(0.9); }
+.btn .swap svg { width: 15px; height: 15px; stroke-width: 2.2; }

@@ -240,7 +240,7 @@
 		}
 
 		const textButton = el("button", { type: "button", class: "btn", title: "Copy as plain text, with tabs between columns (T)", text: "Copy text" });
-		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs (C)", text: "Copy APA table" });
+		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs (C)" }, [el("span", { class: "swap", text: "Copy APA table" })]);
 		head.appendChild(el("div", { class: "actions" }, [textButton, button]));
 
 		const paper = el("div", { class: "paper" });
@@ -422,6 +422,19 @@
 		}
 	}
 
+	// Blurs the button's label out, swaps it, and blurs the new one in
+	function swapLabel(button, content, during) {
+		const label = button.querySelector(".swap");
+		label.classList.add("out");
+		setTimeout(function () {
+			label.textContent = "";
+			for (const part of content)
+				label.appendChild(typeof part === "string" ? document.createTextNode(part) : part);
+			if (during) during();
+			label.classList.remove("out");
+		}, 140);
+	}
+
 	function copyItem(item, asText) {
 		if (!item || !item.apa)
 			return;
@@ -430,10 +443,11 @@
 			markCopied(item);
 			const button = item.button;
 			if (!asText && button) {
-				button.textContent = "Copied";
-				button.classList.remove("primary");
-				button.classList.add("done");
-				setTimeout(function () { button.textContent = "Copy APA table"; button.classList.add("primary"); button.classList.remove("done"); }, 2200);
+				swapLabel(button, [tick(), "Copied"], function () { button.classList.remove("primary"); button.classList.add("done"); });
+				clearTimeout(button.back);
+				button.back = setTimeout(function () {
+					swapLabel(button, ["Copy APA table"], function () { button.classList.add("primary"); button.classList.remove("done"); });
+				}, 2200);
 			}
 			const left = item.apa.todo.length;
 			toast("Table " + item.number + " copied" + (asText ? " as plain text" : "") + "." + (left > 0 ? " Fill in the " + plural(left, "highlight", "highlights") + " after pasting." : ""));
