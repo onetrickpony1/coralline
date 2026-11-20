@@ -49,10 +49,48 @@ fn copy_text(text: String, state: State<Clipboard>) -> Result<(), String> {
     with_clipboard(&state, |c| c.set_text(text))
 }
 
+/// True on Wayland with an NVIDIA driver older than 545 (the versions with the blank-window bug)
+#[cfg(target_os = "linux")]
+fn needs_dmabuf_workaround() -> bool {
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return false;
+    }
+    match std::fs::read_to_string("/proc/driver/nvidia/version") {
+        Ok(text) => nvidia_major(&text).is_none_or(|major| major < 545),
+        Err(_) => false,
+    }
+}
+
+/// The driver's major version from /proc/driver/nvidia/version ("... Kernel Module ... 620.70.06 ...")
+fn nvidia_major(text: &str) -> Option<u32> {
+    let first = text.lines().next()?;
+    first
+        .split_whitespace()
+        .find(|w| w.contains('.') && w.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())))?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reads_the_nvidia_driver_version() {
+        let open = "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  620.70.06  Release Build  (root@)  Tue";
+        assert_eq!(super::nvidia_major(open), Some(620));
+        let old = "NVRM version: NVIDIA UNIX x86_64 Kernel Module  535.183.01  Sun May 12 19:39:15 UTC 2024";
+        assert_eq!(super::nvidia_major(old), Some(535));
+        assert_eq!(super::nvidia_major("garbage"), None);
+    }
+}
+
 pub fn run(file: Option<PathBuf>) {
-    // Some Linux graphics drivers (NVIDIA on Wayland) show WebKit windows blank without this
+    // Older NVIDIA drivers on Wayland show WebKit windows blank unless WebKit's DMA-BUF renderer is off. Turning it
+    // off makes WebKit copy every frame through memory, which makes scrolling slow, so it is only done there.
+    // Setting WEBKIT_DISABLE_DMABUF_RENDERER yourself (0 or 1) always wins.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() && needs_dmabuf_workaround() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 

@@ -15,6 +15,7 @@
 - **Sample size the way APA's sample tables do it.** Meta-analyses say "Number of studies = 18, total *N* = 2,899" (and the number of effects for multilevel models) instead of a wrong *N*. Tables that show their own sample, tables without numbers and audit settings no longer ask for one. Binomial summary data gets *N* = successes + failures, and JAGS models use their own *n*.
 
 ### Fixes
+- **Smooth scrolling on Linux.** A workaround for blank windows on older NVIDIA drivers made WebKit copy every frame through memory, and it was on for everyone. It now applies only on Wayland with NVIDIA drivers older than 545. Setting `WEBKIT_DISABLE_DMABUF_RENDERER` yourself still wins.
 - **Files with very large numbers open.** A meta-analysis file in JASP's Data Library didn't open ("number out of range"); now it does.
 - **Missing values are counted the way JASP counts them.** The sample size now leaves out values stored as "nan", values matching the file's empty-value list ("." and others), and missing levels in nominal columns. Wide-format measurement data gets no count from rows.
 - **Checked against all of JASP's examples.** Every table in JASP's 124 Data Library files was run through the copier. Fixes from that: pairs written with any JASP symbol become one column, empty columns are removed, "NaN" becomes a dash, and small values follow the decimals instead of showing as 8.72×10⁻⁴.
