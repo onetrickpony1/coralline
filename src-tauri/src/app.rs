@@ -60,32 +60,77 @@ fn set_app_icon(variant: String, window: tauri::Window) -> Result<(), String> {
     let image = tauri::image::Image::from_bytes(png).map_err(|e| e.to_string())?;
     window.set_icon(image).map_err(|e| e.to_string())?;
     #[cfg(target_os = "linux")]
-    desktop_entry(&variant, png).map_err(|e| format!("couldn't update the desktop entry: {e}"))?;
+    {
+        desktop_entries(&variant).map_err(|e| format!("couldn't update the desktop entry: {e}"))?;
+        // Wayland taskbars look the icon up once per app id, so the window switches to the id of the
+        // entry with this colour's icon
+        let id = format!("japasp-tool-{}", variant_name(&variant));
+        let target = window.clone();
+        window
+            .run_on_main_thread(move || {
+                if let Ok(gtk_window) = target.gtk_window() {
+                    set_wayland_app_id(&gtk_window, &id);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
-/// Writes ~/.local/share/applications/japasp-tool.desktop (named after the app id the window reports, so
-/// Wayland taskbars find it) with the icon in the chosen colour. Files are only rewritten when they change.
+fn variant_name(variant: &str) -> &'static str {
+    match variant {
+        "dark" => "dark",
+        "pink" => "pink",
+        _ => "blue",
+    }
+}
+
 #[cfg(target_os = "linux")]
-fn desktop_entry(variant: &str, png: &[u8]) -> std::io::Result<()> {
+fn set_wayland_app_id(window: &gtk::ApplicationWindow, id: &str) {
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::prelude::*;
+    extern "C" {
+        fn gdk_wayland_window_set_application_id(window: *mut gtk::gdk::ffi::GdkWindow, id: *const std::os::raw::c_char);
+    }
+    let Some(gdk_window) = window.window() else { return };
+    // Only Wayland windows have an app id; on X11 the window icon is enough
+    if gdk_window.type_().name() != "GdkWaylandToplevel" && gdk_window.type_().name() != "GdkWaylandWindow" {
+        return;
+    }
+    let Ok(id) = std::ffi::CString::new(id) else { return };
+    unsafe { gdk_wayland_window_set_application_id(gdk_window.to_glib_none().0, id.as_ptr()) };
+}
+
+/// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (japasp-tool-blue,
+/// -dark, -pink, hidden from menus, matched by the window's app id), and the launcher entry japasp-tool with
+/// the current colour. Files are only rewritten when they change.
+#[cfg(target_os = "linux")]
+fn desktop_entries(variant: &str) -> std::io::Result<()> {
     let data = match std::env::var_os("XDG_DATA_HOME") {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => PathBuf::from(std::env::var_os("HOME").ok_or_else(|| std::io::Error::other("no home folder"))?).join(".local/share"),
     };
     let icons = data.join("japasp-tool");
-    std::fs::create_dir_all(&icons)?;
-    let icon = icons.join(format!("icon-{variant}.png"));
-    write_if_changed(&icon, png)?;
-
-    let exe = std::env::current_exe()?;
-    let entry = format!(
-        "[Desktop Entry]\nType=Application\nName=jAPAsp\nComment=Copy JASP tables as APA 7 tables\nExec=\"{}\" %f\nIcon={}\nTerminal=false\nCategories=Education;Science;\nStartupWMClass=japasp-tool\n",
-        exe.display(),
-        icon.display()
-    );
     let apps = data.join("applications");
+    std::fs::create_dir_all(&icons)?;
     std::fs::create_dir_all(&apps)?;
-    write_if_changed(&apps.join("japasp-tool.desktop"), entry.as_bytes())
+    let exe = std::env::current_exe()?;
+    let entry = |id: &str, icon: &Path, hidden: bool| {
+        format!(
+            "[Desktop Entry]\nType=Application\nName=jAPAsp\nComment=Copy JASP tables as APA 7 tables\nExec=\"{}\" %f\nIcon={}\nTerminal=false\nCategories=Education;Science;\nStartupWMClass={id}\n{}",
+            exe.display(),
+            icon.display(),
+            if hidden { "NoDisplay=true\n" } else { "" }
+        )
+    };
+    for name in ["blue", "dark", "pink"] {
+        let icon = icons.join(format!("icon-{name}.png"));
+        write_if_changed(&icon, icon_png(name))?;
+        let id = format!("japasp-tool-{name}");
+        write_if_changed(&apps.join(format!("{id}.desktop")), entry(&id, &icon, true).as_bytes())?;
+    }
+    let current = icons.join(format!("icon-{}.png", variant_name(variant)));
+    write_if_changed(&apps.join("japasp-tool.desktop"), entry("japasp-tool", &current, false).as_bytes())
 }
 
 #[cfg(target_os = "linux")]
