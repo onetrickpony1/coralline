@@ -60,6 +60,8 @@ fn set_app_icon(variant: String, window: tauri::Window) -> Result<(), String> {
     let png = icon_png(&variant);
     let image = tauri::image::Image::from_bytes(png).map_err(|e| e.to_string())?;
     window.set_icon(image).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    windows_icon::apply(variant_name(&variant), &window).map_err(|e| format!("couldn't update the Windows icon: {e}"))?;
     #[cfg(target_os = "linux")]
     {
         desktop_entries(&variant).map_err(|e| format!("couldn't update the desktop entry: {e}"))?;
@@ -101,6 +103,88 @@ fn set_wayland_app_id(window: &gtk::ApplicationWindow, id: &str) {
     }
     let Ok(id) = std::ffi::CString::new(id) else { return };
     unsafe { gdk_wayland_window_set_application_id(gdk_window.to_glib_none().0, id.as_ptr()) };
+}
+
+/// Windows: Tauri's set_icon only sets the small title bar icon. The taskbar shows the big one, and the Start
+/// menu and pinned taskbar shortcuts show their own icon, so those follow the theme here.
+#[cfg(windows)]
+mod windows_icon {
+    use std::path::{Path, PathBuf};
+    use windows::core::{Interface, HSTRING};
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READWRITE};
+    use windows::Win32::UI::Shell::{IShellLinkW, SHChangeNotify, ShellLink, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+    use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, SendMessageW, HICON, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_LOADFROMFILE, WM_SETICON};
+
+    fn ico(variant: &str) -> &'static [u8] {
+        match variant {
+            "dark" => include_bytes!("../icons/variants/dark.ico"),
+            "pink" => include_bytes!("../icons/variants/pink.ico"),
+            "green" => include_bytes!("../icons/variants/green.ico"),
+            _ => include_bytes!("../icons/variants/blue.ico"),
+        }
+    }
+
+    /// The .ico for this colour in %LOCALAPPDATA%\japasp\icons (shortcuts need a file to point at)
+    fn icon_file(variant: &str) -> std::io::Result<PathBuf> {
+        let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| std::io::Error::other("no LOCALAPPDATA"))?;
+        let dir = PathBuf::from(base).join("japasp").join("icons");
+        std::fs::create_dir_all(&dir)?;
+        let file = dir.join(format!("japasp-{variant}.ico"));
+        super::write_if_changed(&file, ico(variant))?;
+        Ok(file)
+    }
+
+    pub fn apply(variant: &str, window: &tauri::Window) -> Result<(), String> {
+        let file = icon_file(variant).map_err(|e| e.to_string())?;
+        let hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0 as _);
+        set_window_icons(hwnd, &file);
+        for link in shortcuts() {
+            if link.exists() {
+                if let Err(e) = set_shortcut_icon(&link, &file) {
+                    eprintln!("shortcut {}: {e}", link.display());
+                }
+            }
+        }
+        // Explorer and the taskbar cache shortcut icons: ask them to look again
+        unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
+        Ok(())
+    }
+
+    /// The big icon is the taskbar's, the small one the title bar's (both, so they always match)
+    fn set_window_icons(hwnd: HWND, file: &Path) {
+        for (kind, size) in [(ICON_BIG, 32), (ICON_SMALL, 16)] {
+            let loaded = unsafe { LoadImageW(None, &HSTRING::from(file.as_os_str()), IMAGE_ICON, size, size, LR_LOADFROMFILE) };
+            if let Ok(handle) = loaded {
+                let icon = HICON(handle.0);
+                unsafe { SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize))) };
+            }
+        }
+    }
+
+    /// The Start menu shortcut install.ps1 makes, and the taskbar pin if there is one
+    fn shortcuts() -> Vec<PathBuf> {
+        let mut links = Vec::new();
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let roaming = PathBuf::from(appdata);
+            links.push(roaming.join(r"Microsoft\Windows\Start Menu\Programs\jAPAsp.lnk"));
+            links.push(roaming.join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\jAPAsp.lnk"));
+        }
+        links
+    }
+
+    fn set_shortcut_icon(link: &Path, icon: &Path) -> windows::core::Result<()> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let shell: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            let file: IPersistFile = shell.cast()?;
+            let path = HSTRING::from(link.as_os_str());
+            file.Load(&path, STGM_READWRITE)?;
+            shell.SetIconLocation(&HSTRING::from(icon.as_os_str()), 0)?;
+            file.Save(&path, true)?;
+        }
+        Ok(())
+    }
 }
 
 /// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (japasp-blue,
@@ -180,7 +264,7 @@ pub fn install_desktop_entry() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 /// Returns whether the file was written
 fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
     if std::fs::read(path).map(|old| old == bytes).unwrap_or(false) {

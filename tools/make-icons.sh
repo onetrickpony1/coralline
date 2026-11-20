@@ -12,6 +12,11 @@ variant() {
 	name=$1; a=$2; b=$3; c=$4
 	sed -e "s/#4f8dff/$a/; s/#2f62ea/$b/; s/#1d45c4/$c/" "$src" > "$root/ui/icons/icon-$name.svg"
 	rsvg-convert -w 256 -h 256 "$root/ui/icons/icon-$name.svg" -o "$out/variants/$name.png"
+	# Windows: an .ico per colour for the taskbar and the Start menu shortcut
+	t=$(mktemp -d)
+	for s in 16 24 32 48 64 256; do rsvg-convert -w $s -h $s "$root/ui/icons/icon-$name.svg" -o "$t/$s.png"; done
+	magick "$t"/16.png "$t"/24.png "$t"/32.png "$t"/48.png "$t"/64.png "$t"/256.png "$out/variants/$name.ico"
+	rm -rf "$t"
 }
 variant blue "#4f8dff" "#2f62ea" "#1d45c4"
 variant dark "#5a5e68" "#383b43" "#212329"

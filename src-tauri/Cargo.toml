@@ -17,7 +17,7 @@ path = "src/main.rs"
 [features]
 default = ["app"]
 # The app window. The .jasp reader builds and tests without it: `cargo test --no-default-features`.
-app = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:arboard", "dep:gtk"]
+app = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:arboard", "dep:gtk", "dep:windows"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -33,6 +33,10 @@ tempfile = "3"
 tauri = { version = "2", features = ["image-png"], optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# The same version Tauri uses: the taskbar icon (WM_SETICON) and the Start menu shortcut's icon follow the theme
+windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already used by Tauri; needed to change the window's Wayland app id so the taskbar icon follows the theme

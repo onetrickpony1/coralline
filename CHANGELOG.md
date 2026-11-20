@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- **On Windows the taskbar and Start menu icon follow the theme.** They stayed blue in dark mode, because Windows takes them from the big window icon and the shortcuts, which the app didn't change. A taskbar pin follows too.
+
 ## 0.1.0 - 2026-11-20
 
 ### Features
