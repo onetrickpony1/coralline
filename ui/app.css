@@ -257,8 +257,12 @@ body {
 	color: var(--ink-2);
 }
 .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
-.live.off { background: var(--ink-3); box-shadow: none; }
+/* The sync button: green while the file is watched for saves, spins once when the tables reload */
+.sync { color: var(--ink-3); }
+.sync.live { color: var(--ok); }
+.sync.live:hover { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.sync.spinning svg { animation: spin 0.7s var(--ease); }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .search {
 	display: flex;

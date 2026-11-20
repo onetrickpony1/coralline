@@ -546,7 +546,10 @@
 		const any = !!state.file && visibleItems().length > 0;
 		for (const button of document.querySelectorAll(".needs-file"))
 			button.disabled = !any;
-		$id("liveDot").classList.toggle("off", !(state.autoReload && state.path));
+		const live = !!(state.autoReload && state.path);
+		const sync = $id("reloadButton");
+		sync.classList.toggle("live", live);
+		sync.title = live ? "Watching for saves in JASP: the tables update by themselves. Click to reload now (Ctrl+R)." : "Reload the file (Ctrl+R)";
 	}
 
 	// ---- Opening files ----
@@ -598,9 +601,17 @@
 		});
 	}
 
+	function spinSync() {
+		const sync = $id("reloadButton");
+		sync.classList.remove("spinning");
+		void sync.offsetWidth;
+		sync.classList.add("spinning");
+		setTimeout(function () { sync.classList.remove("spinning"); }, 750);
+	}
+
 	function reload() {
 		if (tauri && state.path)
-			openPath(state.path, true).then(function () { toast("Reloaded " + state.name + "."); });
+			openPath(state.path, true).then(function () { spinSync(); toast("Reloaded " + state.name + "."); });
 		else if (state.file)
 			toast("Reloading works in the app, where the file's location is known.");
 	}
@@ -614,7 +625,7 @@
 				state.stamp = stamp;
 				// JASP writes the file in steps: wait a moment so the reload reads the finished file
 				setTimeout(function () {
-					openPath(state.path, true).then(function () { toast("JASP saved " + state.name + ". Tables updated."); });
+					openPath(state.path, true).then(function () { spinSync(); toast("JASP saved " + state.name + ". Tables updated."); });
 				}, 600);
 			}
 		}, function () {});
