@@ -149,7 +149,7 @@
 				var fromData = group.sampleSize && group.sampleSize.n;
 				if (fromTables.n !== undefined && fromData !== undefined && fromTables.n !== fromData)
 					entry.problems.push("N from tables (" + fromTables.n + ") differs from N in the data (" + fromData + ")");
-				entry.nNote = (text.match(/N = [^.]*\./) || [""])[0];
+				entry.nNote = (text.match(/(Number of (studies|effects)[^.]*|N = [^.]*)\./) || [""])[0];
 			});
 		});
 	}

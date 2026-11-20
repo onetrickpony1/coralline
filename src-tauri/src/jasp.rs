@@ -71,7 +71,10 @@ fn count_samples<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, file: &mut Ja
     }
     let Ok(data) = crate::data::Data::open(temp.path()) else { return };
     for analysis in &mut file.analyses {
-        analysis.sample_size = data.sample_size(&analysis.options);
+        // Audit data is the population the analysis samples from: the tables give the audit sample
+        if !analysis.name.starts_with("audit") {
+            analysis.sample_size = data.sample_size(&analysis.options);
+        }
     }
 }
 

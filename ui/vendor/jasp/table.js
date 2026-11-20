@@ -1855,11 +1855,26 @@ function apaSampleSize(tableElement, title, otherTables) {
 	 */
 	let tableOf = function (other) { return other && other.table ? other.table : other; };
 	let titleOf = function (other) { return other && other.table ? _apaPlain(other.title || "") : $(other).children("thead").children("tr").first().text(); };
-	let isCount = /^(N|n|Valid|Count)$/;
+	// Labels that give the sample size in the table itself ("Inspected" counts the parts of a quality study,
+	// "Minimum sample size" is the planned sample of an audit)
+	// ("No. items" / "Selected items" are the items an audit selected from its population)
+	let isCount = /^(N|n|Valid|Count|Inspected|No\. items|Selected items|(Minimum )?[Ss]ample size( \(n\))?)[\u1D43-\u1D5B\u2070-\u209C]*$/;
 	let own = _apaReadTable(tableElement);
 	let ownLabels = own.heads.concat(own.body.map(function (row) { return row[0]; }), own.body.map(function (row) { return row[1] || ""; }));
 	if (ownLabels.some(function (label) { return isCount.test(label); }))
 		return { shown: true };
+	// APA reports the sample of tables built on one. Tables without numbers (a message such as "No test violations
+	// occurred.") and audit settings, where no sample has been drawn yet, have none.
+	let numbers = own.body.some(function (row) { return row.some(function (v) { return /\d/.test(v); }); });
+	if (!numbers || /^(Table \d+\. )?Default Settings/i.test(title.trim()))
+		return { none: true };
+	// Summary data of a binomial test: the trials are the successes and failures
+	let successes = own.heads.indexOf("Successes"), failures = own.heads.indexOf("Failures");
+	if (successes >= 0 && failures >= 0) {
+		let totals = own.body.map(function (row) { return _apaCount(row[successes]) + _apaCount(row[failures]); });
+		if (totals.length > 0 && totals.every(function (v) { return v === totals[0] && v > 0; }))
+			return { n: totals[0] };
+	}
 
 	let found = [];
 	let add = function (values) {
@@ -1871,7 +1886,7 @@ function apaSampleSize(tableElement, title, otherTables) {
 	// Counts in the analysis's other tables: an N column (summed over groups), or Valid / n rows
 	for (let other of otherTables || []) {
 		let t = _apaReadTable(tableOf(other));
-		let nCol = t.heads.findIndex(function (h) { return /^(N|n)$/.test(h); });
+		let nCol = t.heads.findIndex(function (h) { return /^(N|n|Inspected|Sample size \(n\))$/.test(h); });
 		if (nCol >= 0) {
 			// "Descriptives - Score" lists the cells of one variable: N is the sum of all rows. Otherwise each
 			// variable starts a block in the first column and its groups add up.
@@ -1888,7 +1903,7 @@ function apaSampleSize(tableElement, title, otherTables) {
 		}
 		for (let row of t.body)
 			for (let c = 0; c < 2 && c < row.length; c++)
-				if (/^(Valid|N|n)$/.test(row[c]))
+				if (/^(Valid|N|n|Sample size)$/.test(row[c]))
 					add(row.slice(c + 1).map(_apaCount));
 	}
 
@@ -2249,10 +2264,24 @@ function buildAPATable(tableElement, info, tableNumber) {
 	let fromData = info.dataSampleSize;
 	if (fromData === "varies")
 		fromData = { varies: true };
-	if (!sample.shown && fromData && (fromData.n !== undefined || fromData.range || (sample.n === undefined && !sample.varies)))
+	if (!sample.shown && !sample.none && fromData && (fromData.n !== undefined || fromData.range || fromData.meta || (sample.n === undefined && !sample.varies)))
 		sample = fromData;
 	let count = function (n) { return n >= 1000 ? n.toLocaleString("en") : String(n); };
-	if (sample.n !== undefined)
+	if (sample.meta) {
+		// Meta-analyses count studies, not people (APA: "Number of studies = 120, number of effects = 782, total N = 52,578.")
+		let parts = [];
+		if (sample.meta.studies !== undefined)
+			parts.push(i18n("number of studies") + " = " + count(sample.meta.studies));
+		if (sample.meta.effects !== undefined)
+			parts.push(i18n("number of effects") + " = " + count(sample.meta.effects));
+		if (sample.meta.total !== undefined)
+			parts.push(i18n("total") + " <i>N</i> = " + count(sample.meta.total));
+		let text = parts.join(", ");
+		notes.general.unshift(text.charAt(0).toUpperCase() + text.slice(1) + ".");
+	}
+	else if (sample.none)
+		;
+	else if (sample.n !== undefined)
 		notes.general.unshift("<i>N</i> = " + count(sample.n) + ".");
 	else if (sample.range)
 		notes.general.unshift("<i>N</i>s range from " + count(sample.range.min) + " to " + count(sample.range.max) + " because of missing values.");

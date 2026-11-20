@@ -14,3 +14,7 @@
 - **Checked against all of JASP's examples.** Every table in JASP's 124 Data Library files was run through the copier. Fixes from that: pairs written with any JASP symbol become one column, empty columns are removed, "NaN" becomes a dash, and small values follow the decimals instead of showing as 8.72×10⁻⁴.
 - **Sample size for more analyses.** Frequency data (contingency tables, multinomial and log-linear tests) adds up its counts, using the real values when JASP stores them as codes. SEM models written as syntax find their variables. Full-information maximum likelihood counts every row with any value. Regression and GLM weights no longer stop the count.
 - **A range when each test has its own N.** With missing values handled per variable or pair (t-tests, paired tests, pairwise correlations), the note says "*N*s range from 8 to 9 because of missing values" instead of asking you.
+- **Sample size the way APA's sample tables do it.** Meta-analyses say "Number of studies = 18, total *N* = 2,899" (and the number of effects for multilevel models) instead of a wrong *N*. Tables that show their own sample, tables without numbers and audit settings no longer ask for one. Binomial summary data gets *N* = successes + failures, and JAGS models use their own *n*.
+
+### Fixes
+- Audit files and quality-control measurement data no longer take *N* from the data's rows: those rows are a population or single measurements, and the tables give the real sample.

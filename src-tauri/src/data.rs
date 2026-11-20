@@ -19,6 +19,16 @@ pub enum SampleSize {
     Range { min: u64, max: u64 },
     /// Variables have different numbers of values, and how they combine isn't known
     Varies,
+    /// A meta-analysis: rows are studies (or effects, in a multilevel model), not people.
+    /// APA's sample note: "Number of studies = 120, number of effects = 782, total N = 52,578."
+    Meta {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        studies: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effects: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        total: Option<u64>,
+    },
 }
 
 /// The dataset: column names and their stored columns, plus the filter column
@@ -159,10 +169,57 @@ impl Data {
         names.into_iter().filter(|n| self.stored(n).is_some()).collect()
     }
 
+    fn count_distinct(&self, column: &str, columns: &[&str]) -> rusqlite::Result<u64> {
+        let mut conditions: Vec<String> = columns.iter().map(|c| self.present(c)).collect();
+        conditions.push(self.present(column));
+        if let Some(filter) = &self.filter {
+            conditions.push(format!("\"{filter}\" = 1"));
+        }
+        self.connection.query_row(
+            &format!("SELECT COUNT(DISTINCT \"{column}\") FROM \"{}\" WHERE {}", self.table, conditions.join(" AND ")),
+            [],
+            |r| r.get(0),
+        )
+    }
+
+    /// Meta-analyses: studies (rows with an effect size and its precision), effects in multilevel models,
+    /// and the total N when a column gives each study's sample size
+    fn meta_analysis(&self, options: &Value) -> Option<SampleSize> {
+        let effect = self.columns_in(options.get("effectSize")).into_iter().next()?;
+        let precision = self.columns_in(options.get("effectSizeStandardError")).into_iter().next();
+        let sizes = self.columns_in(options.get("sampleSize")).into_iter().next();
+        let mut used = vec![self.stored(&effect)?];
+        if let Some(c) = precision.as_ref().or(sizes.as_ref()) {
+            used.push(self.stored(c)?);
+        }
+        let rows = self.count(&used).ok()?;
+        let total = match &sizes {
+            Some(c) => Some(self.sum(self.stored(c)?, &used).ok()?),
+            None => None,
+        };
+        if options.get("randomEffectsSpecification").is_some() {
+            // Multilevel: rows are effects; studies are the levels of the clustering variable, when one is set
+            let studies = match self.columns_in(options.get("clustering")).first() {
+                Some(c) => Some(self.count_distinct(self.stored(c)?, &used).ok()?),
+                None => None,
+            };
+            return Some(SampleSize::Meta { studies, effects: Some(rows), total });
+        }
+        Some(SampleSize::Meta { studies: Some(rows), effects: None, total })
+    }
+
     /// N for an analysis, from its options. None when it uses no known variables or rows aren't cases.
     pub fn sample_size(&self, options: &Value) -> Option<SampleSize> {
-        // Wide-format measurement data (quality control) has several measurements per row: rows aren't N
-        if options.get("dataFormat").and_then(Value::as_str) == Some("wideFormat") {
+        if let Some(n) = user_data_n(options) {
+            return Some(SampleSize::N(n));
+        }
+        // (an effect size variable, not the "effect size" checkbox of t-tests and correlations)
+        if !self.columns_in(options.get("effectSize")).is_empty() {
+            return self.meta_analysis(options);
+        }
+        // Measurement-system data (quality control) has several measurements per part, in a row (wide format)
+        // or one per row (long format): either way rows aren't N, and the tables give the parts
+        if options.get("dataFormat").is_some() {
             return None;
         }
         let mut names = BTreeSet::new();
@@ -247,6 +304,15 @@ impl Data {
             _ => Some(SampleSize::Varies),
         }
     }
+}
+
+/// JAGS models take their data size as a constant the user sets ("n" = 94), which the model loops over
+fn user_data_n(options: &Value) -> Option<u64> {
+    let table = options.get("userData")?.as_array()?;
+    let column = |name: &str| table.iter().find(|c| c.get("name").and_then(Value::as_str) == Some(name)).and_then(|c| c.get("values")).and_then(Value::as_array);
+    let (names, values) = (column("Parameter")?, column("R Code")?);
+    let i = names.iter().position(|v| matches!(v.as_str(), Some("n" | "N")))?;
+    values.get(i)?.as_str()?.trim().parse().ok()
 }
 
 /// Strings in every { types, value } object anywhere in the options: JASP's format for lists of variables
@@ -440,6 +506,23 @@ pub(crate) mod tests {
         let o = json!({ ".meta": { "pairs": { "shouldEncode": true } }, "naAction": "perDependent",
             "pairs": { "types": [["scale", "scale"], ["scale", "scale"]], "value": [["x", "y"], ["y", "w"]] } });
         assert_eq!(data.sample_size(&o), Some(SampleSize::Range { min: 3, max: 4 }));
+    }
+
+    #[test]
+    fn meta_analyses_count_studies_and_jags_takes_its_own_n() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        // effect size x (present in rows 1, 3, 4), study sizes in y (2, 4, 5): 3 studies, total 11
+        let o = json!({ "effectSize": { "types": ["scale"], "value": "x" }, "sampleSize": { "types": ["scale"], "value": "y" } });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::Meta { studies: Some(3), effects: None, total: Some(11) }));
+        // multilevel, clustered by sex (rows 1, 3, 4 are F, M, F): 3 effects in 2 studies
+        let o = json!({ "effectSize": { "types": ["scale"], "value": "x" }, "randomEffectsSpecification": [],
+            "clustering": { "types": ["nominal"], "value": "sex" } });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::Meta { studies: Some(2), effects: Some(3), total: None }));
+        let o = json!({ "userData": [{ "name": "Parameter", "values": ["n"] }, { "name": "R Code", "values": ["94"] }] });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(94)));
     }
 
     #[test]
