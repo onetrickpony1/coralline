@@ -637,6 +637,30 @@
 		$id("zoomLabel").textContent = Math.round(state.zoom * 100) + "%";
 	}
 
+	// ---- Credit and feedback ----
+
+	const links = {
+		profile: "https://github.com/onetrickpony1",
+		newIssue: "https://github.com/onetrickpony1/jAPAsp/issues/new"
+	};
+
+	// The app asks the system to open the page in the browser (only these GitHub pages); a plain browser opens a tab
+	function openLink(url) {
+		if (tauri)
+			tauri.core.invoke("open_link", { url: url }).catch(function (e) { toast("Couldn't open the browser: " + e, true); });
+		else
+			window.open(url, "_blank", "noopener");
+	}
+
+	// A new GitHub issue from the feedback form (.github/ISSUE_TEMPLATE/feedback.yml), with the version and system filled in
+	function openFeedback() {
+		const info = tauri ? tauri.core.invoke("app_info") : Promise.resolve({ version: "browser", os: navigator.platform || "" });
+		info.catch(function () { return { version: "", os: "" }; }).then(function (about) {
+			const params = new URLSearchParams({ template: "feedback.yml", version: about.version || "", system: about.os || "" });
+			openLink(links.newIssue + "?" + params.toString());
+		});
+	}
+
 	// The table list on the left: shown, or folded away so the tables get the whole width
 	function setSidebar(on) {
 		state.sidebar = on;
@@ -795,6 +819,8 @@
 		else if (name === "zoom-in") setZoom(state.zoom + 0.1);
 		else if (name === "zoom-out") setZoom(state.zoom - 0.1);
 		else if (name === "shortcuts") { toggleMenu(false); $id("keys").showModal(); }
+		else if (name === "feedback") { toggleMenu(false); openFeedback(); }
+		else if (name === "credit") { toggleMenu(false); openLink(links.profile); }
 	});
 	$id("startNumber").addEventListener("change", function () {
 		const n = Math.max(1, Math.min(999, parseInt(this.value, 10) || 1));

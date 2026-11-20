@@ -188,6 +188,66 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// Opens one of the app's GitHub pages (the author's profile, a new issue) in the default browser. Only those
+/// addresses are allowed, so the page can't ask the system to open anything else.
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    if !allowed_link(&url) {
+        return Err("not one of the app's links".into());
+    }
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", &url]);  // unlike "cmd /c start", keeps the & in the address
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&url);
+        c
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&url);
+        c
+    };
+    let mut child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+fn allowed_link(url: &str) -> bool {
+    url == "https://github.com/onetrickpony1"
+        || url == "https://github.com/onetrickpony1/jAPAsp/issues/new"
+        || (url.starts_with("https://github.com/onetrickpony1/jAPAsp/issues/new?")
+            && url.chars().all(|c| c.is_ascii_graphic()))  // URL-encoded: no spaces, quotes are encoded too
+}
+
+#[derive(serde::Serialize)]
+struct AppInfo {
+    version: &'static str,
+    os: String,
+}
+
+/// For the feedback form: the app version and the system it runs on
+#[tauri::command]
+fn app_info() -> AppInfo {
+    let os = match std::env::consts::OS {
+        "linux" => "Linux",
+        "windows" => "Windows",
+        "macos" => "macOS",
+        other => other,
+    };
+    AppInfo { version: env!("CARGO_PKG_VERSION"), os: format!("{os} ({})", std::env::consts::ARCH) }
+}
+
 /// Plain text only (tab-separated), for spreadsheets and plain editors
 #[tauri::command]
 fn copy_text(text: String, state: State<Clipboard>) -> Result<(), String> {
@@ -220,6 +280,16 @@ fn nvidia_major(text: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_apps_own_links_open() {
+        assert!(super::allowed_link("https://github.com/onetrickpony1"));
+        assert!(super::allowed_link("https://github.com/onetrickpony1/jAPAsp/issues/new?template=feedback.yml&version=0.1.0&system=Linux+%28x86_64%29"));
+        assert!(!super::allowed_link("https://github.com/onetrickpony1/other"));
+        assert!(!super::allowed_link("https://evil.example/?https://github.com/onetrickpony1"));
+        assert!(!super::allowed_link("https://github.com/onetrickpony1/jAPAsp/issues/new?x=\" a\""));
+        assert!(!super::allowed_link("file:///etc/passwd"));
+    }
+
     #[test]
     fn reads_the_nvidia_driver_version() {
         let open = "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  620.70.06  Release Build  (root@)  Tue";
@@ -285,7 +355,7 @@ pub fn run(file: Option<PathBuf>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(Clipboard(Mutex::new(None)))
         .manage(InitialFile(Mutex::new(file)))
-        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa, copy_text, file_stamp, set_app_icon])
+        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa, copy_text, file_stamp, set_app_icon, open_link, app_info])
         .run(tauri::generate_context!())
         .expect("the app window couldn't start");
 }

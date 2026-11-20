@@ -1,0 +1,46 @@
+name: Feedback or a problem
+description: Something wrong in a table, something that could be better, or an idea
+labels: ["feedback"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is it about?
+      options:
+        - A table isn't right for APA 7
+        - The app doesn't work as it should
+        - An idea or a wish
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did and what you saw. A screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: For a table, what APA 7 asks for instead (the section number helps, if you know it).
+  - type: input
+    id: analysis
+    attributes:
+      label: Analysis and table
+      description: For example "Independent Samples T-Test, Descriptives".
+  - type: markdown
+    attributes:
+      value: |
+        If a file would help, attach one made with JASP's example data (File > Data Library), not your own data. Issues are public.
+  - type: input
+    id: version
+    attributes:
+      label: jAPAsp version
+      description: Filled in when you open this from the app.
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Filled in when you open this from the app.

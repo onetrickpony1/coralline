@@ -24,6 +24,7 @@ In the app:
 - **See what changed:** **What changed** on each table (or <kbd>W</kbd>) lists every APA 7 rule that changed something, with each value before and after ("Std. Deviation" to *SD*, "0.3967" to ".40") and the APA section it comes from.
 - **Jump to each highlight** by clicking the to-do under a table. Hide highlights in the preview to check the layout (copies keep them).
 - **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
+- **Feedback and problems** in the menu opens a GitHub issue with the version and system filled in.
 - **Recent files**, preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>).
 
 ## Install
