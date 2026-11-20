@@ -1,5 +1,5 @@
 /* jAPAsp: liquid glass over a soft field of colour. The tables themselves sit on plain white paper,
-   because that is what they become in Word. Three themes: light, dark and pink (plus "system"). */
+   because that is what they become in Word. Four themes: light, dark, pink and green (plus "system"). */
 
 @font-face {
 	font-family: "Inter jAPAsp";
@@ -61,6 +61,7 @@
 	--accent-soft: rgba(63, 85, 242, 0.12);
 	--todo: #ffe24a;
 	--todo-ink: #4d3d00;
+	--todo-strong: #d99a00;
 	--ok: #127a58;
 	--danger: #b3261e;
 	color-scheme: light;
@@ -88,6 +89,7 @@
 	--accent-soft: rgba(255, 255, 255, 0.07);
 	--todo: #ffe24a;
 	--todo-ink: #ffe680;
+	--todo-strong: #d99a00;
 	--ok: #63dca6;
 	--danger: #ff8a80;
 	color-scheme: dark;
@@ -114,9 +116,37 @@
 	--accent-soft: rgba(217, 47, 119, 0.12);
 	--todo: #ffe24a;
 	--todo-ink: #5a3c00;
+	--todo-strong: #d99a00;
 	--ok: #17795a;
 	--danger: #b3261e;
 	color-scheme: light;
+}
+
+/* Green: JASP's own green (#8cc63e) in the glass; buttons a deeper shade of it so white text stays readable */
+[data-theme="green"] {
+	--field: #e6f2d8;
+	--blob1: oklch(0.84 0.14 128);
+	--blob2: oklch(0.88 0.09 115);
+	--blob3: oklch(0.84 0.09 160);
+	--ink: #16300e;
+	--ink-2: #4a6440;
+	--ink-3: #566e4c;
+	--glass: rgba(250, 255, 244, 0.5);
+	--glass-solid: rgba(247, 252, 241, 0.94);
+	--edge: rgba(255, 255, 255, 0.8);
+	--edge-low: rgba(22, 48, 14, 0.08);
+	--hair: rgba(22, 48, 14, 0.1);
+	--sheen: rgba(255, 255, 255, 0.68);
+	--shadow: 0 1px 1px rgba(22, 48, 14, 0.05), 0 12px 32px -8px rgba(70, 120, 30, 0.25);
+	--accent: #437c12;
+	--accent-2: #36680c;
+	--on-accent: #ffffff;
+	--accent-soft: rgba(140, 198, 62, 0.16);
+	--todo: #f2542d;      /* vermilion: yellow barely shows on green, and the error red (#b3261e) must stay apart */
+	--todo-ink: #7a1c05;
+	--todo-strong: #d8432a;
+	--ok: #0f6f6a;   /* teal, so "done" doesn't blend into the green accent */
+	--danger: #b3261e;
 }
 
 /* ---- Base ---- */
@@ -312,6 +342,7 @@ body {
 .themes button:hover { color: var(--ink); }
 .themes button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 .themes button[data-theme-choice="pink"][aria-checked="true"] svg { fill: currentColor; }
+.themes button[data-theme-choice="green"] svg { stroke-width: 2; }
 
 /* ---- Menu ---- */
 
@@ -596,6 +627,8 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 .paper table { color: #000; }
 .paper p { max-width: 451pt; }  /* the title and note wrap at the width of a page, as they do when pasted */
+/* Green theme: the preview marks to-dos in light red, like its other marks (copies keep Word's yellow) */
+[data-theme="green"] .paper [style*="#ffff00"] { background-color: #ffc4c4 !important; }
 .hide-highlights .paper [style*="#ffff00"] { background: transparent !important; }
 .paper .flash { animation: flash 1.2s var(--ease) 2; border-radius: 2px; }
 @keyframes flash { 50% { box-shadow: 0 0 0 4px var(--todo); } }
@@ -603,7 +636,7 @@ main { flex: 1; min-height: 0; display: flex; }
 div.todo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .todo .lead { font-size: 12.5px; color: var(--ink-2); margin-right: 2px; }
 .todo button {
-	/* The same glass as the other buttons (.btn); the app's one yellow (--todo, as in the sidebar) only in the dot */
+	/* The same glass as the other buttons (.btn); the app's one to-do colour (--todo: yellow, red in green) only in the dot */
 	position: relative;
 	display: inline-flex;
 	align-items: center;
@@ -657,6 +690,7 @@ div.todo.ready { color: var(--ok); font-size: 13px; font-weight: 550; }
 .changes .v { font-family: "Times New Roman", Times, serif; font-size: 14px; padding: 1px 6px; border-radius: 4px; background: #fff; color: #000; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
 .changes .v.none { font-family: var(--font); font-size: 12px; color: #666; font-style: italic; }
 .changes .v mark { background: #ffff00; color: inherit; }
+[data-theme="green"] .changes .v mark { background: #ffc4c4; }
 .hide-highlights .changes .v mark { background: transparent; }
 .changes .arrow { color: var(--ink-2); font-size: 16px; font-weight: 600; }
 .changes .times { color: var(--ink-2); font-size: 12px; }
@@ -819,9 +853,9 @@ body.dragging .dropping { opacity: 1; }
 /* ---- Round 2: title bar, menu, cards ---- */
 
 /* Themes in the menu, with their names */
-.menu .themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
-.menu .themes button { width: auto; height: 30px; display: flex; gap: 5px; justify-content: center; font: 500 12px/1 var(--font); color: var(--ink-2); }
-.menu .themes button svg { width: 15px; height: 15px; }
+.menu .themes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.menu .themes button { width: auto; height: 44px; display: flex; flex-direction: column; gap: 4px; justify-content: center; align-items: center; font: 500 11px/1 var(--font); color: var(--ink-2); }
+.menu .themes button svg { width: 16px; height: 16px; }
 .menu .themes button[aria-checked="true"] { background: var(--glass-solid); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), inset 0 0 0 1.5px var(--accent); }
 .menu .row small { display: block; }
 .menu-label { display: block; padding: 6px 10px 2px; font-size: 12px; color: var(--ink-3); }
@@ -837,8 +871,8 @@ body.dragging .dropping { opacity: 1; }
 .bar-progress .ring circle { stroke-width: 6; }
 .bar-progress:hover { box-shadow: inset 0 0 0 1px var(--accent); }
 
-/* Amber while copied tables still have yellow parts or need copying again */
-#progress.unfinished .ring .done, .bar-progress.unfinished .ring .done { stroke: #d99a00; }
+/* Amber (red in green) while copied tables still have parts to fill in or need copying again */
+#progress.unfinished .ring .done, .bar-progress.unfinished .ring .done { stroke: var(--todo-strong); }
 .ready-hint.warn { color: var(--ink); font-weight: 500; }
 
 /* Reload button: a small dot shows whether JASP's saves are being watched (green) or not (grey ring) */

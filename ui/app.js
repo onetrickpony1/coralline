@@ -43,7 +43,7 @@
 		sidebar: settings.read("sidebar", true),     // the table list on the left is shown
 		autoReload: settings.read("autoReload", true),
 		reduced: root.classList.contains("reduced"),
-		appIcon: settings.read("appIcon", "theme"),   // "theme", or a fixed "blue", "dark" or "pink"
+		appIcon: settings.read("appIcon", "theme"),   // "theme", or a fixed "blue", "dark", "pink" or "green"
 		shownIcon: null,   // set by theme-boot.js before the first paint
 		recent: settings.read("recent", [])
 	};
@@ -269,10 +269,10 @@
 		applyIcon();
 		rove();
 	}
-	// The icon follows the theme (light: blue, dark: dark grey, pink: pink) unless one is chosen in the menu
+	// The icon follows the theme (light: blue, dark: dark grey, pink: pink, green: green) unless one is chosen in the menu
 	function applyIcon() {
 		const theme = root.getAttribute("data-theme");
-		const variant = state.appIcon !== "theme" ? state.appIcon : theme === "dark" ? "dark" : theme === "pink" ? "pink" : "blue";
+		const variant = state.appIcon !== "theme" ? state.appIcon : theme === "dark" ? "dark" : theme === "pink" ? "pink" : theme === "green" ? "green" : "blue";
 		for (const button of document.querySelectorAll("[data-icon-choice]"))
 			button.setAttribute("aria-checked", String(button.dataset.iconChoice === state.appIcon));
 		rove();
@@ -445,10 +445,10 @@
 			hint.textContent = plural(stale.length, "copied table has", "copied tables have") + (changed ? " changed" : " a new number") + " since you copied " + them + ": copy " + them + " again (" + (stale.length === 1 ? "Table " : "Tables ") + stale.map(function (i) { return i.number; }).join(", ") + ").";
 		}
 		else if (copied.length === 0)
-			hint.textContent = items.some(function (i) { return i.apa.todo.length > 0; }) ? "After pasting, replace the yellow parts in your document." : "";
+			hint.textContent = items.some(function (i) { return i.apa.todo.length > 0; }) ? "After pasting, replace the highlighted parts (yellow in Word) in your document." : "";
 		else if (yellow > 0) {
 			const tables = copied.filter(function (i) { return i.apa.todo.length > 0; }).map(function (i) { return i.number; });
-			hint.textContent = "Still to do in your document: " + yellowParts(yellow) + " (" + (tables.length === 1 ? "Table " : "Tables ") + tables.join(", ") + ").";
+			hint.textContent = "Still to do in your document: " + highlightedParts(yellow) + " (" + (tables.length === 1 ? "Table " : "Tables ") + tables.join(", ") + ").";
 		}
 		else
 			hint.textContent = "";
@@ -489,8 +489,8 @@
 		else if (item.left) { kind = "left"; label = "Left out of your report"; }
 		else if (copy === "renumbered") { kind = "stale"; label = "Now Table " + item.number + ": copy it again (you copied it as Table " + state.copied.get(item.key).n + ")"; }
 		else if (copy === "changed") { kind = "stale"; label = "JASP's values changed since you copied it: copy it again"; }
-		else if (copy === "ok") { kind = "copied" + (extra > 0 ? " more" : ""); label = todo > 0 ? "Copied. Finish the " + yellowParts(todo) + " in your document" : "Copied"; }
-		else if (extra > 0) { kind = "todo"; label = plural(todo, "yellow part", "yellow parts") + " to finish after pasting"; }
+		else if (copy === "ok") { kind = "copied" + (extra > 0 ? " more" : ""); label = todo > 0 ? "Copied. Finish the " + highlightedParts(todo) + " in your document" : "Copied"; }
+		else if (extra > 0) { kind = "todo"; label = plural(todo, "highlighted part", "highlighted parts") + " to finish after pasting"; }
 		else if (todo > 0) { kind = "title"; label = "Add a title after pasting"; }
 		else { kind = "ready"; label = "Nothing to add: ready to paste"; }
 		mark.className = "mark " + kind;
@@ -505,7 +505,7 @@
 
 	function staleCount() { return countable().filter(function (i) { const c = copyState(i); return c === "renumbered" || c === "changed"; }).length; }
 
-	function yellowParts(n) { return n === 1 ? "yellow part" : n + " yellow parts"; }
+	function highlightedParts(n) { return n === 1 ? "highlighted part" : n + " highlighted parts"; }
 
 	// Leaves a table out of the report (no number, not in Copy all) or puts it back
 	function setLeftOut(item, left) {
@@ -1160,7 +1160,7 @@
 			}
 			const left = item.apa.todo.length;
 			const name = item.number ? "Table " + item.number : "The table";
-			toast(name + " copied" + (asText ? " as plain text" : "") + ". " + (left > 0 ? "Paste it into your document, then finish the " + yellowParts(left) + "." : "Paste it into your document."));
+			toast(name + " copied" + (asText ? " as plain text" : "") + ". " + (left > 0 ? "Paste it into your document, then finish the " + highlightedParts(left) + "." : "Paste it into your document."));
 		}, function (e) {
 			toast("Couldn't copy: " + (e && e.message || e), true);
 		});
@@ -1175,7 +1175,7 @@
 		copyRaw(asText ? null : apaClipboardHTML(html), text).then(function () {
 			items.forEach(markCopied);
 			const left = items.reduce(function (n, i) { return n + i.apa.todo.length; }, 0);
-			toast(plural(items.length, "table", "tables") + " copied" + (asText ? " as plain text" : "") + ". " + (left > 0 ? "Paste them, then finish the " + yellowParts(left) + "." : "Paste them into your document."));
+			toast(plural(items.length, "table", "tables") + " copied" + (asText ? " as plain text" : "") + ". " + (left > 0 ? "Paste them, then finish the " + highlightedParts(left) + "." : "Paste them into your document."));
 		}, function (e) {
 			toast("Couldn't copy: " + (e && e.message || e), true);
 		});

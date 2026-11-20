@@ -43,11 +43,12 @@ fn copy_apa(html: String, text: String, state: State<Clipboard>) -> Result<(), S
     with_clipboard(&state, |c| c.set_html(html, Some(text)))
 }
 
-/// The app icon in each colour: blue (light theme), dark grey (dark theme), pink (pink theme)
+/// The app icon in each colour: blue (light theme), dark grey (dark theme), pink (pink theme), green (green theme)
 fn icon_png(variant: &str) -> &'static [u8] {
     match variant {
         "dark" => include_bytes!("../icons/variants/dark.png"),
         "pink" => include_bytes!("../icons/variants/pink.png"),
+        "green" => include_bytes!("../icons/variants/green.png"),
         _ => include_bytes!("../icons/variants/blue.png"),
     }
 }
@@ -81,6 +82,7 @@ fn variant_name(variant: &str) -> &'static str {
     match variant {
         "dark" => "dark",
         "pink" => "pink",
+        "green" => "green",
         _ => "blue",
     }
 }
@@ -102,7 +104,7 @@ fn set_wayland_app_id(window: &gtk::ApplicationWindow, id: &str) {
 }
 
 /// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (japasp-blue,
-/// -dark, -pink, hidden from menus, matched by the window's app id), and the launcher entry japasp with
+/// -dark, -pink, -green, hidden from menus, matched by the window's app id), and the launcher entry japasp with
 /// the current colour. Files are only rewritten when they change.
 #[cfg(target_os = "linux")]
 fn desktop_entries(variant: &str) -> std::io::Result<()> {
@@ -130,7 +132,7 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
         icon_png(name).hash(&mut hasher);
         icons.join(format!("icon-{name}-{:08x}.png", hasher.finish() as u32))
     };
-    let current_files: Vec<PathBuf> = ["blue", "dark", "pink"].iter().map(|n| file_of(n)).collect();
+    let current_files: Vec<PathBuf> = ["blue", "dark", "pink", "green"].iter().map(|n| file_of(n)).collect();
     if let Ok(entries) = std::fs::read_dir(&icons) {
         for old in entries.flatten().map(|e| e.path()) {
             if old.extension().is_some_and(|x| x == "png") && !current_files.contains(&old) {
@@ -138,7 +140,7 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
             }
         }
     }
-    for name in ["blue", "dark", "pink"] {
+    for name in ["blue", "dark", "pink", "green"] {
         let icon = file_of(name);
         write_if_changed(&icon, icon_png(name))?;
         let id = format!("japasp-{name}");

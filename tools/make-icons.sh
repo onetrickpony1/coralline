@@ -1,5 +1,5 @@
 #!/bin/sh
-# Renders ui/icon.svg (the blue icon, the source) to the app icons, plus the dark and pink versions the app
+# Renders ui/icon.svg (the blue icon, the source) to the app icons, plus the dark, pink and green versions the app
 # switches to with the theme. Needs rsvg-convert and ImageMagick.
 set -e
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -16,6 +16,7 @@ variant() {
 variant blue "#4f8dff" "#2f62ea" "#1d45c4"
 variant dark "#5a5e68" "#383b43" "#212329"
 variant pink "#ff8fbb" "#ec4d8e" "#c92a6c"
+variant green "#98cc52" "#6aa72a" "#3f7a12"   # around JASP's green, #8cc63e
 
 # Bundle icons (installers, file managers): the blue version
 rsvg-convert -w 32 -h 32 "$src" -o "$out/32x32.png"
