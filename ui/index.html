@@ -11,6 +11,9 @@
 <body>
 
 <header class="titlebar glass">
+	<button class="icon-btn" id="sideButton" type="button" aria-controls="sidePanel" aria-expanded="true" title="Hide the table list (B)" aria-label="Hide the table list" hidden>
+		<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2.5" /><path d="M8 4v12" /><path class="fill" d="M4.6 5.6h2.4v8.8H4.6z" /></svg>
+	</button>
 	<div class="brand"><img data-app-icon src="icon.svg" alt="" width="28" height="28"><span>jAPAsp</span></div>
 
 	<div class="file" id="filePill" hidden>
@@ -80,7 +83,7 @@
 	</section>
 
 	<div class="layout" id="layout" hidden>
-		<nav class="side glass" aria-label="Tables">
+		<nav class="side glass" id="sidePanel" aria-label="Tables">
 			<div class="summary">
 				<svg class="ring" viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18" /><circle class="done" id="ringDone" cx="22" cy="22" r="18" /></svg>
 				<div><strong id="readyCount">0 of 0</strong><span>tables ready to paste</span></div>
@@ -109,6 +112,7 @@
 		<dt><kbd>C</kbd></dt><dd>Copy the current table</dd>
 		<dt><kbd>T</kbd></dt><dd>Copy the current table as plain text</dd>
 		<dt><kbd>W</kbd></dt><dd>Show what was changed to match APA 7</dd>
+		<dt><kbd>B</kbd></dt><dd>Show or hide the table list</dd>
 		<dt><kbd>Shift C</kbd></dt><dd>Copy all tables shown</dd>
 		<dt><kbd>H</kbd></dt><dd>Show or hide highlights in the preview</dd>
 		<dt><kbd>Ctrl +</kbd> <kbd>Ctrl −</kbd> <kbd>Ctrl 0</kbd></dt><dd>Preview size</dd>

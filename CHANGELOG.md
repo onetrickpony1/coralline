@@ -17,6 +17,7 @@
 - **See exactly what was changed.** A **What changed** button on each table (or <kbd>W</kbd>) lists every rule that changed something, why APA 7 asks for it, and each value before and after, compared with the table as JASP shows it: decimals, leading zeros, abbreviations, italics, headings, notes, the title and the layout.
 - **One-line install and updates.** Install with one line on Windows, Linux or macOS (see the README); run it again to update. On Linux it adds jAPAsp to the app menu.
 - **The command is now `japasp`** (it was `japasp-tool`). Your theme, recent files and other settings move over by themselves the first time the new version starts. `japasp --version` prints the version.
+- **Hide the table list.** The button at the left of the title bar (or <kbd>B</kbd>) folds the list of tables away so the tables use the whole window, and brings it back. The app remembers your choice.
 
 ### Fixes
 - **App search shows the chosen icon straight away (KDE).** After you picked another app icon colour, KDE's app search and menu kept the old icon for up to a minute; now they update at once.

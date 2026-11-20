@@ -452,7 +452,23 @@ main { flex: 1; min-height: 0; display: flex; }
 	flex-direction: column;
 	border-radius: var(--r-lg);
 	overflow: hidden;
+	transition: width 0.28s var(--ease), margin-right 0.28s var(--ease), opacity 0.2s var(--ease), visibility 0s linear 0s;
 }
+/* Folded away: no width, no gap, and out of the tab order (inert, set in app.js) */
+.layout.side-hidden .side {
+	width: 0;
+	border-width: 0;
+	padding: 0;
+	margin-right: -12px;
+	opacity: 0;
+	visibility: hidden;
+	transition: width 0.28s var(--ease), margin-right 0.28s var(--ease), opacity 0.16s var(--ease), visibility 0s linear 0.28s;
+}
+/* The contents keep their size while the panel opens and closes, instead of reflowing */
+.side > .summary, .side > .side-list { min-width: 284px; box-sizing: border-box; }
+.side > .filters { min-width: 260px; box-sizing: border-box; }
+#sideButton .fill { fill: currentColor; stroke: none; opacity: 0.55; transition: opacity 0.2s var(--ease); }
+#sideButton.off .fill { opacity: 0; }
 .summary { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px; }
 .summary strong { display: block; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .summary span { color: var(--ink-2); font-size: 12.5px; }
@@ -684,6 +700,7 @@ body.dragging .dropping { opacity: 1; }
 }
 @media (max-width: 760px) {
 	.side { display: none; }
+	#sideButton { display: none; }
 	.layout { padding: 10px; }
 	.brand span { display: none; }
 	.titlebar { flex-wrap: wrap; }

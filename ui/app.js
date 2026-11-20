@@ -38,6 +38,7 @@
 		theme: settings.read("theme", "system"),
 		zoom: settings.read("zoom", 1),
 		highlights: settings.read("highlights", true),
+		sidebar: settings.read("sidebar", true),     // the table list on the left is shown
 		autoReload: settings.read("autoReload", true),
 		start: settings.read("start", 1),
 		reduced: root.classList.contains("reduced"),
@@ -178,6 +179,7 @@
 		$id("empty").hidden = true;
 		$id("layout").hidden = false;
 		$id("filePill").hidden = false;
+		$id("sideButton").hidden = false;
 		$id("searchWrap").hidden = false;
 		$id("fileName").textContent = state.name;
 		$id("fileName").title = state.path || state.name;
@@ -635,6 +637,20 @@
 		$id("zoomLabel").textContent = Math.round(state.zoom * 100) + "%";
 	}
 
+	// The table list on the left: shown, or folded away so the tables get the whole width
+	function setSidebar(on) {
+		state.sidebar = on;
+		settings.write("sidebar", on);
+		$id("layout").classList.toggle("side-hidden", !on);
+		$id("sidePanel").inert = !on;
+		const button = $id("sideButton");
+		const label = on ? "Hide the table list" : "Show the table list";
+		button.setAttribute("aria-expanded", String(on));
+		button.setAttribute("aria-label", label);
+		button.title = label + " (B)";
+		button.classList.toggle("off", !on);
+	}
+
 	function setHighlights(on) {
 		state.highlights = on;
 		settings.write("highlights", on);
@@ -860,6 +876,7 @@
 		else if (key === "c") copyItem(currentItem(), false);
 		else if (key === "t" || key === "T") copyItem(currentItem(), true);
 		else if (key === "w" || key === "W") toggleChanges(currentItem());
+		else if (key === "b" || key === "B") setSidebar(!state.sidebar);
 		else if (key === "h" || key === "H") { setHighlights(!state.highlights); toast(state.highlights ? "Highlights shown in the preview." : "Highlights hidden in the preview. Copies still have them."); }
 		else if (key === "?") $id("keys").showModal();
 	});
@@ -895,6 +912,8 @@
 	applyTheme();
 	setZoom(state.zoom);
 	setHighlights(state.highlights);
+	setSidebar(state.sidebar);
+	$id("sideButton").addEventListener("click", function () { setSidebar(!state.sidebar); });
 	$id("autoReload").checked = state.autoReload;
 	$id("reduceEffects").checked = state.reduced;
 	$id("startNumber").value = String(state.start);
