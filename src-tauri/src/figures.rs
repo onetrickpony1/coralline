@@ -36,6 +36,11 @@ pub fn work_dir() -> PathBuf {
     base.join("japasp").join("figures")
 }
 
+/// Whether this computer has a JASP that jAPAsp can redraw plots with
+pub fn available() -> bool {
+    runner().is_some()
+}
+
 /// How to start JASP's Rscript, or None when there's no JASP we can use
 fn runner() -> Option<Vec<String>> {
     if cfg!(target_os = "linux") {
@@ -188,16 +193,22 @@ fn random_parts(analysis: &serde_json::Value, plot: &str) -> Option<String> {
     let random_kind = name.starts_with("ml")
         || ["Prophet", "Bsts", "JAGS", "Network", "BayesianProcess", "Bain", "LearnBayes", "LS", "audit"].iter().any(|k| name.contains(k));
     let options = analysis.get("options").and_then(|o| o.as_object());
-    let bootstrap = options.is_some_and(|o| {
-        o.iter().any(|(k, v)| {
-            let k = k.to_lowercase();
-            (k.contains("bootstrap") && v.as_bool() == Some(true)) || (k.contains("cimethod") && v.as_str().is_some_and(|s| s.contains("bootstrap")))
-        })
-    });
+    let switched_on = |part: &str| options.is_some_and(|o| o.iter().any(|(k, v)| k.to_lowercase().contains(part) && v.as_bool() == Some(true)));
+    let bootstrap = switched_on("bootstrap")
+        || options.is_some_and(|o| o.iter().any(|(k, v)| k.to_lowercase().contains("cimethod") && v.as_str().is_some_and(|s| s.contains("bootstrap"))));
+    let plot = plot.to_lowercase();
+    let module = analysis.get("dynamicModule").and_then(|m| m.get("moduleName")).and_then(|m| m.as_str()).unwrap_or("");
     if random_kind || bootstrap {
         Some("the analysis has random parts, so a rerun draws a slightly different picture".into())
-    } else if plot.to_lowercase().contains("robustness") {
+    } else if plot.contains("scree") && switched_on("parallel") {
+        // parallel analysis simulates data, and no saved table holds the simulated points
+        Some("the scree plot's parallel analysis is a simulation, so a rerun draws different points".into())
+    } else if plot.contains("robustness") {
         Some("robustness curves can differ a little between runs".into())
+    } else if plot.contains("forest") {
+        Some("redrawn forest plots don't keep JASP's study order yet".into())
+    } else if module == "jaspQualityControl" {
+        Some("quality control charts get crowded when redrawn with APA text sizes".into())
     } else {
         None
     }
@@ -266,7 +277,9 @@ fn same_tables(saved: &serde_json::Value, rerun: &serde_json::Value) -> Result<(
         }
         for (i, (row, again)) in rows.iter().zip(others).enumerate() {
             let (Some(row), Some(again)) = (row.as_object(), again.as_object()) else { continue };
-            for key in row.keys().chain(again.keys()).filter(|k| !k.starts_with('.')) {
+            // "error": the estimated error of a Bayes factor's numerical integration, which varies a little
+            // between runs and isn't plotted (the Bayes factors themselves are still compared)
+            for key in row.keys().chain(again.keys()).filter(|k| !k.starts_with('.') && *k != "error") {
                 let (a, b) = (row.get(key).unwrap_or(&missing), again.get(key).unwrap_or(&missing));
                 if !same_value(a, b) {
                     return Err(format!("{path}: row {} {key}: {a} saved, {b} in the rerun", i + 1));
@@ -294,7 +307,7 @@ fn add_originals(jasp: &Path, figures: &mut serde_json::Value) {
     for (i, analysis) in saved.iter().enumerate() {
         let mut found = Vec::new();
         if let Some(results) = analysis.get("results") {
-            images(results, "", &mut found);
+            images(results, "", &[], &mut found);
         }
         let mut used = vec![false; found.len()];
         let mut drawn: Vec<serde_json::Value> = list.iter().filter(|f| of(f) == i + 1).cloned().collect();
@@ -307,15 +320,20 @@ fn add_originals(jasp: &Path, figures: &mut serde_json::Value) {
             if let Some(k) = hit {
                 used[k] = true;
                 attach(&mut archive, figure, found[k].1);
+                figure["containerTitles"] = serde_json::json!(found[k].2);
+                // JASP's own title as shown (the rerun's can lack a level name the container adds)
+                if let Some(t) = found[k].1.get("title").filter(|t| t.as_str().is_some_and(|t| !t.is_empty())) {
+                    figure["title"] = t.clone();
+                }
             }
         }
-        for (k, (key, image)) in found.iter().enumerate() {
+        for (k, (key, image, titles)) in found.iter().enumerate() {
             if used[k] {
                 continue;
             }
             let mut figure = serde_json::json!({
                 "analysis": i + 1, "name": key, "title": image.get("title").cloned().unwrap_or_default(),
-                "error": "the rerun didn't draw this plot", "facts": null,
+                "containerTitles": titles, "error": "the rerun didn't draw this plot", "facts": null,
             });
             attach(&mut archive, &mut figure, image);
             if figure.get("original").is_some() {
@@ -326,6 +344,8 @@ fn add_originals(jasp: &Path, figures: &mut serde_json::Value) {
     }
     all.extend(list.iter().filter(|f| of(f) == 0 || of(f) > saved.len()).cloned());
     *list = all;
+    // each analysis's options, for the figure notes (what error bars show, and the like)
+    figures["options"] = serde_json::Value::Array(saved.iter().map(|a| a.get("options").cloned().unwrap_or_default()).collect());
 }
 
 /// The two names hold the same characters (pair names like "a-b" and "b-a")
@@ -355,19 +375,28 @@ fn attach<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>, fi
     }
 }
 
-/// Every saved plot picture in an analysis's results: (its key, the image object), in the results' order
-fn images<'a>(value: &'a serde_json::Value, key: &str, out: &mut Vec<(String, &'a serde_json::Value)>) {
+type Found<'a> = (String, &'a serde_json::Value, Vec<String>);
+
+/// Every saved plot picture in an analysis's results: (its key, the image object, the titles of the containers
+/// around it, outermost first), in the results' order
+fn images<'a>(value: &'a serde_json::Value, key: &str, titles: &[String], out: &mut Vec<Found<'a>>) {
     match value {
         serde_json::Value::Object(map) => {
             if map.get("data").and_then(|d| d.as_str()).is_some_and(|d| d.ends_with(".png")) {
-                out.push((key.to_string(), value));
+                out.push((key.to_string(), value, titles.to_vec()));
                 return;
             }
+            let mut inner = titles.to_vec();
+            if let Some(title) = map.get("title").and_then(|t| t.as_str()).filter(|t| !t.trim().is_empty()) {
+                if map.contains_key("collection") {
+                    inner.push(title.to_string());
+                }
+            }
             for (k, v) in map {
-                images(v, k, out);
+                images(v, k, &inner, out);
             }
         }
-        serde_json::Value::Array(items) => items.iter().for_each(|v| images(v, key, out)),
+        serde_json::Value::Array(items) => items.iter().for_each(|v| images(v, key, titles, out)),
         _ => {}
     }
 }
@@ -401,6 +430,9 @@ mod tests {
         assert!(super::same_tables(&saved, &table(json!([{ "v": "b", "x": 0.3 }]))).is_err(), "a different label");
         assert!(super::same_tables(&saved, &table(json!([]))).is_err(), "missing rows");
         assert!(super::same_tables(&saved, &json!({})).is_err(), "a missing table");
+        let bf = table(json!([{ "BF": 6.33, "error": 0.0016 }]));
+        assert!(super::same_tables(&bf, &table(json!([{ "BF": 6.33, "error": 0.0019 }]))).is_ok(), "a Bayes factor's error estimate");
+        assert!(super::same_tables(&bf, &table(json!([{ "BF": 6.4, "error": 0.0016 }]))).is_err(), "the Bayes factor itself");
         assert!(super::same_tables(&json!({}), &saved).is_err(), "nothing to check against");
         let cell = table(json!([{ "m": { "format": "dp:3", "value": 360.0 } }]));
         assert!(super::same_tables(&cell, &table(json!([{ "m": { "format": "dp:3", "value": 360 } }]))).is_ok(), "cells with a format, 360.0 = 360");
@@ -436,6 +468,11 @@ mod tests {
         assert!(super::random_parts(&json!({ "name": "TTestBayesianIndependentSamples", "options": {} }), "drp_robustnessPlot").is_some());
         assert!(super::random_parts(&json!({ "name": "TTestBayesianIndependentSamples", "options": {} }), "drp_priorAndPosteriorPlot").is_none());
         assert!(super::random_parts(&json!({ "name": "Anova", "options": { "bootstrapEstimates": false } }), "descriptivesPlot").is_none());
+        let efa = json!({ "name": "exploratoryFactorAnalysis", "options": { "screePlotParallelAnalysisResults": true } });
+        assert!(super::random_parts(&efa, "modelContainer_screePlot").is_some(), "parallel analysis is simulated");
+        assert!(super::random_parts(&efa, "pathPlot").is_none());
+        assert!(super::random_parts(&json!({ "name": "ClassicMetaAnalysis", "options": {} }), "forestPlot").is_some());
+        assert!(super::random_parts(&json!({ "name": "attributesCharts", "options": {}, "dynamicModule": { "moduleName": "jaspQualityControl" } }), "pChart").is_some());
     }
 
     #[test]
