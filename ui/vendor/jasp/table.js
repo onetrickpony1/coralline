@@ -1105,8 +1105,14 @@ function _apaNotes(footnotes) {
 			specific.push({ symbol: symbol(sym), text: text });
 		else if (_.isString(sym) && /^\s*<em>/i.test(sym))  // jaspBase marks general notes with "<em>Note.</em>"
 			general.push(text);
-		else if (_.isString(sym) && /^[*\u2217\u2020\u2021]+$/.test(_apaPlain(sym)))
-			probability.push({ symbol: sym, text: text });
+		else if (_.isString(sym) && /^[*\u2217\u2020\u2021]+$/.test(_apaPlain(sym))) {
+			// JASP's flag note reads "* p < .05, ** p < .01, *** p < .001": APA writes "*p < .05. **p < .01. ***p < .001."
+			let levels = (_apaPlain(sym) + " " + _apaPlain(footnote.text)).match(/(\*+)\s*p\s*<\s*(\.\d+)/g);
+			if (levels && levels.length > 0 && _apaPlain(footnote.text).replace(/[\s*p<.,\d]/g, "") === "")
+				probability.push({ symbol: "", text: levels.map(function (l) { let m = l.match(/(\*+)\s*p\s*<\s*(\.\d+)/); return m[1] + "<i>p</i> &lt; " + m[2] + "."; }).join(" ") });
+			else if (text !== "")
+				probability.push({ symbol: sym, text: text });
+		}
 		else
 			specific.push({ symbol: sym || "", text: text });
 	}
@@ -1220,7 +1226,7 @@ function apaRenderTable(model) {
 		let text = _apaPlain(item.cell.innerHTML);
 		let other = gridThree.grid[item.row] && gridThree.grid[item.row][item.col];
 		let otherText = other ? _apaPlain(other.innerHTML) : "";
-		let flattened = /^[-\u2212]?0[.,]0\d$/.test(text) && !/^[-\u2212]?0[.,]000$/.test(otherText);
+		let flattened = /^[-\u2212]?0[.,]0\d$/.test(text) && /^[-\u2212]?0[.,]00[1-9]$/.test(otherText);  // 0.007, not 0.07
 		let exponentOnlyAtTwo = /×10/.test(text) && !/×10/.test(otherText);  // JASP writes values under 0.01 as 7.00×10⁻³
 		if (other && (flattened || exponentOnlyAtTwo))
 			needsThree[item.col] = true;
@@ -1276,6 +1282,10 @@ function _apaCorrelationMatrix(table) {
 	}
 	if (renamed < 2)
 		return false;
+	// The numbered first column lists the variables (APA's sample heads it "Variable")
+	let firstHead = headRow.cells[0];
+	if (firstHead && firstHead.colSpan === 1 && _apaPlain(firstHead.innerHTML) === "")
+		firstHead.textContent = "Variable";
 
 	// Drop the last column if it only holds dashes or nothing (no row or column spans reach into it)
 	let rows = $table.children("thead, tbody").children("tr").toArray();
@@ -1791,6 +1801,65 @@ function _apaCorrelationSampleRows(table) {
 	return values[0];
 }
 
+function _apaCorrelationIntervals(table) {
+	// APA puts a correlation's confidence interval in square brackets in the same cell, under r (".24 [−.10, .54]"),
+	// instead of separate "Lower 95% CI" and "Upper 95% CI" rows. Returns the CI level ("95") when it merged any.
+	let $table = $(table);
+	let headCount = $table.children("thead").children("tr").length;
+	let rows = $table.children("thead, tbody").children("tr").toArray();
+	let layout = _apaGrid(rows);
+	let labelAt = function (r) {
+		let found = null;
+		for (let item of layout.placed)
+			if (item.row === r && item.rowSpan === 1 && found === null) {
+				let label = _apaLabel(item.cell);
+				if (/^(Pearson's r|Spearman's rho|Kendall's [Tt]au[ -]?[Bb]?|r|rho|tau)$/.test(label) || /^(Lower|Upper) \d+% CI$/.test(label))
+					found = { label: label, col: item.col };
+			}
+		return found;
+	};
+	let groups = [];
+	for (let r = headCount; r + 2 < rows.length; r++) {
+		let est = labelAt(r), lower = labelAt(r + 1), upper = labelAt(r + 2);
+		if (!est || !lower || !upper || /CI$/.test(est.label))
+			continue;
+		let lo = lower.label.match(/^Lower (\d+)% CI$/), hi = upper.label.match(/^Upper (\d+)% CI$/);
+		if (!lo || !hi || lo[1] !== hi[1] || est.col !== lower.col || lower.col !== upper.col)
+			continue;
+		groups.push({ r: r, col: est.col, level: lo[1] });
+		r += 2;
+	}
+	if (groups.length === 0 || groups.some(function (g) { return g.level !== groups[0].level; }))
+		return null;
+	// Values only: data cells must be one row high
+	for (let g of groups)
+		if (layout.placed.some(function (i) { return i.col > g.col && i.row >= g.r && i.row <= g.r + 2 && i.rowSpan > 1; }))
+			return null;
+	let isEmpty = function (cell) { return !cell || /^[\s\u2014\u2013-]*$/.test(_apaPlain(cell.innerHTML)); };
+	for (let g of groups) {
+		let width = layout.grid[g.r].length;
+		for (let c = g.col + 1; c < width; c++) {
+			let est = layout.grid[g.r][c], lo = layout.grid[g.r + 1][c], hi = layout.grid[g.r + 2][c];
+			if (isEmpty(est) || isEmpty(lo) || isEmpty(hi))
+				continue;
+			// Limits of a correlation can't exceed 1 either: no leading zero
+			let limit = function (cell) { return _apaPlain(cell.innerHTML).trim().replace(/^([-\u2212]?)0(?=[.,]\d)/, "$1"); };
+			est.appendChild(document.createTextNode(" "));
+			est.appendChild(document.createElement("br"));
+			est.appendChild(document.createTextNode("[" + limit(lo) + ", " + limit(hi) + "]"));
+		}
+	}
+	// Remove the limit rows; labels spanning into them get shorter
+	for (let g of groups.slice().reverse())
+		for (let r of [g.r + 2, g.r + 1]) {
+			for (let item of layout.placed)
+				if (item.row < r && item.row + item.rowSpan - 1 >= r)
+					item.cell.rowSpan = Math.max(1, item.cell.rowSpan - 1);
+			rows[r].remove();
+		}
+	return groups[0].level;
+}
+
 function _apaCorrelationLabelColumn(table) {
 	// The statistic column of a correlation matrix ("Pearson's r" on every row) says nothing once the p rows are gone:
 	// drop it. If it names more than one statistic (r and confidence limits), head it "Statistic".
@@ -1986,6 +2055,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(_apaPlain(info.title)) || /Pearson|Spearman|Kendall/.test(table.textContent));
 	let starsNote = isCorrelationMatrix ? _apaCorrelationStars(table) : null;
 	let matrixN = isCorrelationMatrix ? _apaCorrelationSampleRows(table) : null;
+	let intervalLevel = isCorrelationMatrix ? _apaCorrelationIntervals(table) : null;
 	if (isCorrelationMatrix)
 		_apaCorrelationLabelColumn(table);
 	let todo = [];
@@ -2241,6 +2311,8 @@ function buildAPATable(tableElement, info, tableNumber) {
 	let noteLabel = i18n("Note.");
 	if (starsNote && starsNote.text)
 		notes.specific.push(starsNote);
+	if (intervalLevel)
+		notes.general.push(_apaEscape(i18n("Values in square brackets indicate the %1% confidence interval for each correlation.").replace("%1", intervalLevel)));
 
 	// Explain the abbreviations used in the table, unless the notes already do
 	let tableText = $(table).find("th, td").map(function () { return _apaPlain(this.innerHTML); }).get().join(" ");  // cell by cell, so words don't run together
@@ -2307,13 +2379,13 @@ function buildAPATable(tableElement, info, tableNumber) {
 	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><i>' + titleHtml + "</i></p>";
 	if (tooWide)
 		html += '<p style="margin: 0 0 6pt 0; font-weight: normal;">' + _apaTodo(i18n("Too wide for a portrait page: put this table on a landscape page")) + "</p>";
-	html += table.outerHTML.replace(/−/g, "-");
+	html += table.outerHTML;  // APA uses a true minus sign (−.10); the plain text below keeps hyphens for spreadsheets
 	if (notes.general.length > 0 || notes.specific.length > 0) {
 		let parts = [];
 		if (notes.general.length > 0)
 			parts.push('<i>' + _apaEscape(noteLabel) + '</i> ' + notes.general.join(" "));
 		for (let note of notes.specific)
-			parts.push(note.symbol + " " + note.text);
+			parts.push(note.symbol ? note.symbol + " " + note.text : note.text);
 		html += '<p style="margin: 6pt 0 0 0; font-weight: normal;">' + parts.join("<br>") + "</p>";
 	}
 	html += "</div>";
