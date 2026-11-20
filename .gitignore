@@ -1,0 +1,5 @@
+src-tauri/target/
+src-tauri/gen/
+tests/ui/fixtures/*.json
+ui/_test.html
+ui/_shot.html

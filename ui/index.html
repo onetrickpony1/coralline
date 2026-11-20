@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jAPAsp</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="bar">
+	<div class="brand"><span class="logo" aria-hidden="true"></span>jAPAsp</div>
+	<div class="file" id="fileName"></div>
+	<button class="primary" id="openButton" type="button">Open JASP file</button>
+	<input id="fileInput" type="file" accept=".jasp,.json" hidden>
+</header>
+
+<main id="main">
+	<section class="empty" id="empty">
+		<div class="drop" id="drop">
+			<div class="drop-icon" aria-hidden="true"></div>
+			<h1>Drop a saved JASP file here</h1>
+			<p>Every results table in it becomes an APA 7 table you can paste into Word or Google Docs.</p>
+			<button class="primary" id="openButton2" type="button">Open JASP file</button>
+			<p class="hint">Save your work in JASP first. Only what is in the saved file is shown.</p>
+		</div>
+	</section>
+
+	<div class="layout" id="layout" hidden>
+		<nav class="side" id="side" aria-label="Tables"></nav>
+		<section class="tables" id="tables"></section>
+	</div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/jasp/jquery-3.7.0.js"></script>
+<script src="vendor/jasp/underscore-min.js"></script>
+<script src="vendor/jasp/backbone-1.5.0.js"></script>
+<script src="vendor/jasp/jaspwidgets.js"></script>
+<script src="vendor/jasp/object.js"></script>
+<script src="vendor/jasp/utils.js"></script>
+<script src="vendor/jasp/table.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

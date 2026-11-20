@@ -1,0 +1,33 @@
+[package]
+name = "japasp-tool"
+version = "0.1.0"
+description = "Copies the tables in a saved JASP file as APA 7 tables, ready to paste into Word or Google Docs"
+license = "AGPL-3.0-or-later"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "japasp_tool"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "japasp-tool"
+path = "src/main.rs"
+
+[features]
+default = ["app"]
+# The app window. The .jasp reader builds and tests without it: `cargo test --no-default-features`.
+app = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:arboard"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [], optional = true }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"], optional = true }
