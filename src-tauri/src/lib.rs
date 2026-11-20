@@ -1,4 +1,5 @@
 pub mod data;
+pub mod figures;
 pub mod jasp;
 
 #[cfg(feature = "app")]

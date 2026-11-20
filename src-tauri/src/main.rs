@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-const USAGE: &str = "Usage:\n  japasp [FILE.jasp]       open the app (with a file)\n  japasp --json FILE.jasp  print the file's tables as JSON\n  japasp --version         print the version";
+const USAGE: &str = "Usage:\n  japasp [FILE.jasp]       open the app (with a file)\n  japasp --json FILE.jasp  print the file's tables as JSON\n  japasp --figures FILE.jasp  rerun the analyses in JASP's R and print the APA figures as JSON\n  japasp --version         print the version";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -18,6 +18,19 @@ fn main() {
             };
             match japasp_lib::jasp::read_path(&PathBuf::from(path)) {
                 Ok(file) => println!("{}", serde_json::to_string(&file).expect("tables are valid JSON")),
+                Err(e) => {
+                    eprintln!("{path}: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some("--figures") => {
+            let Some(path) = args.get(1) else {
+                eprintln!("{USAGE}");
+                std::process::exit(2);
+            };
+            match japasp_lib::figures::render(&PathBuf::from(path)) {
+                Ok(figures) => println!("{figures}"),
                 Err(e) => {
                     eprintln!("{path}: {e}");
                     std::process::exit(1);

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Features
+- **APA figures, first step** (Linux, command line only for now): `japasp --figures FILE.jasp` reruns the file's analyses in JASP's own R and draws every plot in APA style.
+
 ### Fixes
 - **On Windows the taskbar and Start menu icon follow the theme.** They stayed blue in dark mode, because Windows takes them from the big window icon and the shortcuts, which the app didn't change. A taskbar pin follows too.
 
