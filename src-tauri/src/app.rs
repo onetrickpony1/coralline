@@ -123,13 +123,28 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
             if hidden { "NoDisplay=true\n" } else { "" }
         )
     };
+    // Icon files are named after their content, so a redesigned icon gets a new path: KDE caches icons by path
+    let file_of = |name: &str| {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        icon_png(name).hash(&mut hasher);
+        icons.join(format!("icon-{name}-{:08x}.png", hasher.finish() as u32))
+    };
+    let current_files: Vec<PathBuf> = ["blue", "dark", "pink"].iter().map(|n| file_of(n)).collect();
+    if let Ok(entries) = std::fs::read_dir(&icons) {
+        for old in entries.flatten().map(|e| e.path()) {
+            if old.extension().is_some_and(|x| x == "png") && !current_files.contains(&old) {
+                let _ = std::fs::remove_file(old);
+            }
+        }
+    }
     for name in ["blue", "dark", "pink"] {
-        let icon = icons.join(format!("icon-{name}.png"));
+        let icon = file_of(name);
         write_if_changed(&icon, icon_png(name))?;
         let id = format!("japasp-tool-{name}");
         write_if_changed(&apps.join(format!("{id}.desktop")), entry(&id, &icon, true).as_bytes())?;
     }
-    let current = icons.join(format!("icon-{}.png", variant_name(variant)));
+    let current = file_of(variant_name(variant));
     write_if_changed(&apps.join("japasp-tool.desktop"), entry("japasp-tool", &current, false).as_bytes())
 }
 
