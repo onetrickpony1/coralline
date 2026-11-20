@@ -1,7 +1,7 @@
 // jAPAsp: shows every table of a saved JASP file as an APA 7 table, with a copy button for each.
 // The tables are drawn by JASP's own code (vendor/jasp), so they match what JASP shows, and the APA copy is
 // JASP's "Copy APA Table" code. In the app, Rust reads the file and puts the copy on the clipboard. In a plain
-// browser (for tests), a JSON dump from `japasp-tool --json` can be opened instead.
+// browser (for tests), a JSON dump from `japasp --json` can be opened instead.
 (function () {
 	"use strict";
 
@@ -740,10 +740,10 @@
 		$id("fileInput").click();
 	}
 
-	// Browser only: JSON dumps from `japasp-tool --json`
+	// Browser only: JSON dumps from `japasp --json`
 	function openBrowserFile(file) {
 		if (!/\.json$/i.test(file.name)) {
-			toast("In a browser, open the JSON from `japasp-tool --json FILE.jasp`. The app opens .jasp files directly.", true);
+			toast("In a browser, open the JSON from `japasp --json FILE.jasp`. The app opens .jasp files directly.", true);
 			return;
 		}
 		file.text().then(function (text) { state.path = null; show(JSON.parse(text), file.name); }).catch(function (e) { toast(String(e), true); });

@@ -64,7 +64,7 @@ fn set_app_icon(variant: String, window: tauri::Window) -> Result<(), String> {
         desktop_entries(&variant).map_err(|e| format!("couldn't update the desktop entry: {e}"))?;
         // Wayland taskbars look the icon up once per app id, so the window switches to the id of the
         // entry with this colour's icon
-        let id = format!("japasp-tool-{}", variant_name(&variant));
+        let id = format!("japasp-{}", variant_name(&variant));
         let target = window.clone();
         window
             .run_on_main_thread(move || {
@@ -101,8 +101,8 @@ fn set_wayland_app_id(window: &gtk::ApplicationWindow, id: &str) {
     unsafe { gdk_wayland_window_set_application_id(gdk_window.to_glib_none().0, id.as_ptr()) };
 }
 
-/// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (japasp-tool-blue,
-/// -dark, -pink, hidden from menus, matched by the window's app id), and the launcher entry japasp-tool with
+/// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (japasp-blue,
+/// -dark, -pink, hidden from menus, matched by the window's app id), and the launcher entry japasp with
 /// the current colour. Files are only rewritten when they change.
 #[cfg(target_os = "linux")]
 fn desktop_entries(variant: &str) -> std::io::Result<()> {
@@ -110,7 +110,7 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => PathBuf::from(std::env::var_os("HOME").ok_or_else(|| std::io::Error::other("no home folder"))?).join(".local/share"),
     };
-    let icons = data.join("japasp-tool");
+    let icons = data.join("japasp");
     let apps = data.join("applications");
     std::fs::create_dir_all(&icons)?;
     std::fs::create_dir_all(&apps)?;
@@ -141,11 +141,21 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
     for name in ["blue", "dark", "pink"] {
         let icon = file_of(name);
         write_if_changed(&icon, icon_png(name))?;
-        let id = format!("japasp-tool-{name}");
+        let id = format!("japasp-{name}");
         write_if_changed(&apps.join(format!("{id}.desktop")), entry(&id, &icon, true).as_bytes())?;
     }
     let current = file_of(variant_name(variant));
-    write_if_changed(&apps.join("japasp-tool.desktop"), entry("japasp-tool", &current, false).as_bytes())
+    write_if_changed(&apps.join("japasp.desktop"), entry("japasp", &current, false).as_bytes())
+}
+
+/// For the installer: the launcher entry and icons, before the app has been opened (Linux only; elsewhere a no-op)
+pub fn install_desktop_entry() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        move_old_name();
+        desktop_entries("blue").map_err(|e| format!("couldn't write the desktop entry: {e}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -198,7 +208,49 @@ mod tests {
     }
 }
 
+/// Up to 0.1.0 the app was called japasp-tool. Its settings (theme, recent files) live in WebKit's storage, in a
+/// folder named after the app identifier, so that folder is moved to the new name once. On Linux the launcher
+/// entries and icons it wrote under the old name are removed (the app writes new ones under the new name).
+fn move_old_name() {
+    const OLD: &str = "io.github.onetrickpony1.japasp-tool";
+    const NEW: &str = "io.github.onetrickpony1.japasp";
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let mut bases: Vec<PathBuf> = Vec::new();
+    match std::env::var_os("XDG_DATA_HOME") {
+        Some(dir) if !dir.is_empty() => bases.push(PathBuf::from(dir)),
+        _ => bases.extend(home.iter().map(|h| h.join(".local/share"))),
+    }
+    bases.extend(std::env::var_os("LOCALAPPDATA").map(PathBuf::from));
+    bases.extend(std::env::var_os("APPDATA").map(PathBuf::from));
+    bases.extend(home.iter().flat_map(|h| [h.join("Library/Application Support"), h.join("Library/WebKit"), h.join("Library/Caches")]));
+    for base in &bases {
+        let (old, new) = (base.join(OLD), base.join(NEW));
+        if old.is_dir() && !new.exists() {
+            let _ = std::fs::rename(&old, &new);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(data) = bases.first() {
+        for name in ["japasp-tool", "japasp-tool-blue", "japasp-tool-dark", "japasp-tool-pink"] {
+            let entry = data.join("applications").join(format!("{name}.desktop"));
+            if std::fs::read_to_string(&entry).is_ok_and(|text| text.contains("Name=jAPAsp")) {
+                let _ = std::fs::remove_file(entry);
+            }
+        }
+        let icons = data.join("japasp-tool");
+        if let Ok(entries) = std::fs::read_dir(&icons) {
+            for icon in entries.flatten().map(|e| e.path()) {
+                if icon.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("icon-") && n.ends_with(".png")) {
+                    let _ = std::fs::remove_file(icon);
+                }
+            }
+            let _ = std::fs::remove_dir(icons);  // only if nothing else is in it
+        }
+    }
+}
+
 pub fn run(file: Option<PathBuf>) {
+    move_old_name();
     // Older NVIDIA drivers on Wayland show WebKit windows blank unless WebKit's DMA-BUF renderer is off. Turning it
     // off makes WebKit copy every frame through memory, which makes scrolling slow, so it is only done there.
     // Setting WEBKIT_DISABLE_DMABUF_RENDERER yourself (0 or 1) always wins.

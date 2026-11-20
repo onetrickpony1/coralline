@@ -3,18 +3,20 @@
 
 use std::path::PathBuf;
 
-const USAGE: &str = "Usage:\n  japasp-tool [FILE.jasp]        open the app (with a file)\n  japasp-tool --json FILE.jasp   print the file's tables as JSON";
+const USAGE: &str = "Usage:\n  japasp [FILE.jasp]       open the app (with a file)\n  japasp --json FILE.jasp  print the file's tables as JSON\n  japasp --version         print the version";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--help") | Some("-h") => println!("{USAGE}"),
+        Some("--version") | Some("-V") => println!("japasp {}", env!("CARGO_PKG_VERSION")),
+        Some("--desktop-entry") => desktop_entry(),
         Some("--json") => {
             let Some(path) = args.get(1) else {
                 eprintln!("{USAGE}");
                 std::process::exit(2);
             };
-            match japasp_tool::jasp::read_path(&PathBuf::from(path)) {
+            match japasp_lib::jasp::read_path(&PathBuf::from(path)) {
                 Ok(file) => println!("{}", serde_json::to_string(&file).expect("tables are valid JSON")),
                 Err(e) => {
                     eprintln!("{path}: {e}");
@@ -28,7 +30,7 @@ fn main() {
 
 #[cfg(feature = "app")]
 fn open_app(file: Option<PathBuf>) {
-    japasp_tool::run(file);
+    japasp_lib::run(file);
 }
 
 #[cfg(not(feature = "app"))]
@@ -36,3 +38,15 @@ fn open_app(_file: Option<PathBuf>) {
     eprintln!("This build has no app window (built without the \"app\" feature).\n{USAGE}");
     std::process::exit(2);
 }
+
+/// Used by install.sh: adds jAPAsp to the Linux app menu
+#[cfg(feature = "app")]
+fn desktop_entry() {
+    if let Err(e) = japasp_lib::install_desktop_entry() {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(feature = "app"))]
+fn desktop_entry() {}

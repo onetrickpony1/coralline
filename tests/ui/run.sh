@@ -1,6 +1,6 @@
 #!/bin/sh
 # Interface test: renders every fixture in headless Chrome and checks the APA output.
-# Fixtures are JSON dumps (`japasp-tool --json FILE.jasp > tests/ui/fixtures/NAME.json`); they aren't in the repo,
+# Fixtures are JSON dumps (`japasp --json FILE.jasp > tests/ui/fixtures/NAME.json`); they aren't in the repo,
 # and the test is skipped when there are none.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)

@@ -1,17 +1,17 @@
 [package]
-name = "japasp-tool"
+name = "japasp"
 version = "0.1.0"
 description = "Copies the tables in a saved JASP file as APA 7 tables, ready to paste into Word or Google Docs"
 license = "AGPL-3.0-or-later"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.90"  # Tauri 2 needs 1.90
 
 [lib]
-name = "japasp_tool"
+name = "japasp_lib"  # not "japasp": on Windows the library and the program would write the same .pdb file
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "japasp-tool"
+name = "japasp"
 path = "src/main.rs"
 
 [features]

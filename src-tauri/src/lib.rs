@@ -4,4 +4,4 @@ pub mod jasp;
 #[cfg(feature = "app")]
 mod app;
 #[cfg(feature = "app")]
-pub use app::run;
+pub use app::{install_desktop_entry, run};
