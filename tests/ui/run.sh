@@ -29,6 +29,9 @@ if not m or not m.group(1):
 r = json.loads(html.unescape(m.group(1)))
 print("tables:", r["tables"], "errors:", len(r["errors"]), "failed checks:", len(r["failures"]))
 for line in r.get("missingN", []): print("   no N:", line)
+import os
+if os.environ.get("SHOW_STUBS"):
+    for line in r.get("stubs", []): print("   stub:", line)
 for line in r["errors"] + r["failures"]:
     print("  ", line)
 sys.exit(1 if r["errors"] or r["failures"] or r["tables"] == 0 else 0)

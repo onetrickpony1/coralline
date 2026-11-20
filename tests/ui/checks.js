@@ -39,5 +39,6 @@
 	expect(document.querySelectorAll(".card button.primary").length > 0, "cards with copy buttons are shown");
 	expect(document.querySelectorAll(".side a").length === document.querySelectorAll(".card").length, "one sidebar link per card");
 	out.missingN = [].concat.apply([], Object.keys(byName).map(function (f) { return [].concat.apply([], byName[f].map(function (g) { return g.items.filter(function (i) { return i.apa && /add sample size|sample sizes differ/.test(i.apa.text); }).map(function (i) { return f + " / " + g.title + " / " + i.title; }); })); }));
+	out.stubs = [].concat.apply([], Object.keys(byName).map(function (f) { return [].concat.apply([], byName[f].map(function (g) { return g.items.filter(function (i) { return i.apa; }).map(function (i) { var lines = i.apa.text.split("\n"); var head = lines.slice(2).find(function (l) { return !/^\t/.test(l); }) || ""; return f + " / " + i.title + ": " + head.split("\t").slice(0, 2).join(" | "); }); })); }));
 	document.getElementById("result").textContent = JSON.stringify(out);
 })();

@@ -31,6 +31,8 @@ pub struct Analysis {
     /// N counted from the saved data, for tables that don't report it (see data.rs)
     #[serde(rename = "sampleSize", skip_serializing_if = "Option::is_none")]
     pub sample_size: Option<crate::data::SampleSize>,
+    /// The variables the analysis uses, from its options (to recognise them in tables)
+    pub variables: Vec<String>,
     #[serde(skip)]
     options: Value,
 }
@@ -92,6 +94,11 @@ pub fn parse_analyses(root: &Value) -> Result<JaspFile, Error> {
                 title: text(a.get("title")),
                 tables,
                 sample_size: None,
+                variables: {
+                    let mut names = std::collections::BTreeSet::new();
+                    crate::data::variables(a.get("options").unwrap_or(&Value::Null), &mut names);
+                    names.into_iter().collect()
+                },
                 options: a.get("options").cloned().unwrap_or(Value::Null),
             }
         })
@@ -264,6 +271,7 @@ mod tests {
         buffer.set_position(0);
         let file = read(buffer).unwrap();
         assert_eq!(file.analyses[0].sample_size, Some(crate::data::SampleSize::N(4)));
+        assert_eq!(file.analyses[0].variables, ["y"]);
         assert_eq!(serde_json::to_value(&file).unwrap()["analyses"][0]["sampleSize"], json!({ "n": 4 }));
     }
 }

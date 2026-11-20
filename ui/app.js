@@ -40,7 +40,8 @@
 						footnotes: model.get("footnotes"),
 						otherTables: plain.map(function (table, j) { return { table: table, title: models[j].get("title") }; })
 							.filter(function (_, j) { return j !== i; }),
-						dataSampleSize: analysis.sampleSize  // counted from the saved data, used when the tables don't say
+						dataSampleSize: analysis.sampleSize,  // counted from the saved data, used when the tables don't say
+						variableNames: analysis.variables     // lets the first column be headed "Variable" when it lists them
 					}, number);
 				} catch (e) {
 					item.error = String(e && e.message || e);

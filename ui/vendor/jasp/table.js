@@ -1477,6 +1477,16 @@ function _apaTransposeDescriptives(table) {
 	return { turned: true, n: n };
 }
 
+function _apaAreVariables(labels, variableNames) {
+	// True when every label is one of the analysis's variables (compared without case, spaces or underscores,
+	// so the tidied "Face type" still matches "FaceType")
+	if (!variableNames || variableNames.length === 0 || labels.length === 0)
+		return false;
+	let key = function (name) { return String(name).toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""); };
+	let known = variableNames.map(key);
+	return labels.every(function (label) { return known.indexOf(key(label)) !== -1; });
+}
+
 function _apaStatisticColumn(table) {
 	// Contingency tables label each row's statistic in an unheaded column ("Count", "Expected count"). With one
 	// statistic the column says nothing and goes; with several it is headed "Statistic".
@@ -1857,7 +1867,8 @@ function buildAPATable(tableElement, info, tableNumber) {
 		return apaNoZeroLeadLabels.indexOf(label) !== -1
 			|| /(^|\s)correlation(\s|$)/i.test(label)
 			|| /^(Cronbach's α|McDonald's ω|Guttman's λ\S*|Pearson's r|Spearman's rho|Kendall's (tau|Tau)\S*)(\s|$)/.test(label)
-			|| (hasCorrelation && /(^|\s)(CI|Lower|Upper)(\s|$)/i.test(label));
+			|| (hasCorrelation && /(^|\s)(CI|Lower|Upper)(\s|$)/i.test(label))
+			|| (label === "W" && /Shapiro-Wilk/i.test(_apaPlain(info.title)));  // Shapiro-Wilk W can't exceed 1 (Mann-Whitney W can)
 	};
 	let headingRow = headRows.length > 0 ? headRows.length - 1 : -1;
 	let zeroLeadColumns = {};
@@ -1922,8 +1933,8 @@ function buildAPATable(tableElement, info, tableNumber) {
 				heading = "Model";
 			else if (/\bTests\b/.test(_apaPlain(info.title)) && c === 0)
 				heading = "Test";
-			else if (c === 0)
-				heading = "Variable";
+			else if (c === 0 && _apaAreVariables(labels, info.variableNames))
+				heading = "Variable";  // only when the caller knows the analysis's variables and these are them
 			if (heading) {
 				headCell.textContent = heading;
 				continue;
