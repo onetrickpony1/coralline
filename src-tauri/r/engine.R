@@ -16,16 +16,28 @@ setDecoders <- function(map) {
 runJasp <- function(o, ds) {
   name <- attr(o, "analysisName")
   enc <- if (ncol(ds) == 0) NULL else tryCatch(suppressWarnings(encodeOptionsAndDataset(o, ds)), error = function(e) NULL)
-  if (is.null(enc) || nrow(enc$encodingMap) == 0) { setDecoders(NULL); return(runAnalysis(name, ds, o, view = FALSE, quiet = TRUE)) }
+  map <- if (is.null(enc)) NULL else enc$encodingMap
+  # Options that hold column names without types, which jaspTools doesn't encode: the repeated-measures cells
+  untyped <- intersect(c("repeatedMeasuresCells"), names(o))
+  extra <- setdiff(unlist(o[untyped]), map$original)
+  extra <- extra[extra %in% colnames(ds)]
+  if (length(extra)) map <- rbind(map[, c("original", "encoded", "type")], data.frame(original = extra, encoded = "", type = "scale"))
+  if (ncol(ds) == 0 || is.null(map) || nrow(map) == 0) { setDecoders(NULL); return(runAnalysis(name, ds, o, view = FALSE, quiet = TRUE)) }
   # Number the encoded names by the variable's place in the data, as JASP does (JaspColumn_<n>_Encoded), not by
   # where it first shows up in the options: analyses that sort variables (pairs like "a-b") then sort like JASP
-  map <- enc$encodingMap
   pos <- match(map$original, colnames(ds)) - 1L
+  if (anyNA(pos)) pos[is.na(pos)] <- 10000L + seq_len(sum(is.na(pos)))
   map$encoded <- ifelse(duplicated(map$original) | duplicated(map$original, fromLast = TRUE),
     sprintf("JaspColumn_%d_Encoded_%s", pos, map$type), sprintf("JaspColumn_%d_Encoded", pos))
-  if (!anyNA(pos)) enc <- tryCatch(list(
+  rebuilt <- tryCatch(list(
     options = jaspTools:::encodeOptionsWithMap(o, map, colnames(ds)),
-    dataset = jaspTools:::createEncodedDataset(ds, map), encodingMap = map), error = function(e) enc)
+    dataset = jaspTools:::createEncodedDataset(ds, map), encodingMap = map), error = function(e) NULL)
+  if (is.null(rebuilt)) { if (is.null(enc) || nrow(enc$encodingMap) == 0) { setDecoders(NULL); return(runAnalysis(name, ds, o, view = FALSE, quiet = TRUE)) } }
+  else enc <- rebuilt
+  for (u in untyped) {
+    v <- enc$options[[u]]
+    if (is.character(v)) { k <- match(v, enc$encodingMap$original); v[!is.na(k)] <- enc$encodingMap$encoded[k[!is.na(k)]]; enc$options[[u]] <- v }
+  }
   attr(enc$options, "analysisName") <- name
   decode <- setDecoders(enc$encodingMap)
   res <- runAnalysis(name, enc$dataset, enc$options, view = FALSE, quiet = TRUE, encodedDataset = TRUE)
