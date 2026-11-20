@@ -17,6 +17,21 @@ fn open_jasp(path: String) -> Result<jasp::JaspFile, String> {
     jasp::read_path(Path::new(&path)).map_err(|e| e.to_string())
 }
 
+/// Whether plots can be redrawn as APA figures here (JASP installed in a way jAPAsp can use)
+#[tauri::command]
+fn figures_available() -> bool {
+    crate::figures::available()
+}
+
+/// Reruns the file's analyses in JASP's R and returns its plots as APA figures (see figures.rs). Takes from
+/// seconds to minutes, so it runs off the window's thread.
+#[tauri::command]
+async fn make_figures(path: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::figures::render(Path::new(&path)).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn initial_file(state: State<InitialFile>) -> Option<String> {
     state.0.lock().ok()?.take().map(|p| p.to_string_lossy().into_owned())
@@ -441,7 +456,7 @@ pub fn run(file: Option<PathBuf>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(Clipboard(Mutex::new(None)))
         .manage(InitialFile(Mutex::new(file)))
-        .invoke_handler(tauri::generate_handler![open_jasp, initial_file, copy_apa, copy_text, file_stamp, set_app_icon, open_link, app_info])
+        .invoke_handler(tauri::generate_handler![open_jasp, figures_available, make_figures, initial_file, copy_apa, copy_text, file_stamp, set_app_icon, open_link, app_info])
         .run(tauri::generate_context!())
         .expect("the app window couldn't start");
 }

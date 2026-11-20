@@ -2570,3 +2570,140 @@ function buildAPATable(tableElement, info, tableNumber) {
 		}
 	return { html: html, text: lines.join("\n"), todo: todo, changes: log.changes };
 }
+
+// ========== APA figures ==========
+
+// Error bars and bands: what they show comes from the analysis options, whether they are drawn from the plot itself
+// (facts: the plot's layers, from the external tool's rerun; without facts the options alone decide)
+function _apaFigureIntervalNote(info) {
+	let options = info.options || {};
+	let geoms = [];
+	for (let plot of ((info.facts && info.facts.plots) || []))
+		geoms = geoms.concat(plot.geoms || []);
+	let known = !!info.facts;
+	let hasBars = geoms.some(function (g) { return /Errorbar|Linerange|Pointrange|Crossbar/.test(g); });
+	let hasBand = geoms.some(function (g) { return /Ribbon|Smooth/.test(g); });
+	let name = (info.plotName || "") + " " + (info.title || "");
+	// Option families: bar plots, descriptives plots; their keys share a prefix (barPlotErrorBarType, descriptivePlotCiLevel)
+	let prefix = /bar ?plot/i.test(name) ? /^barPlot/ : /descripti/i.test(name) ? /^descriptives?Plot/ : null;
+	let pick = function (pattern) {
+		let keys = Object.keys(options).filter(function (k) { return pattern.test(k) && (!prefix || prefix.test(k)); });
+		return keys.length > 0 ? options[keys[0]] : undefined;
+	};
+	let level = pick(/(CiLevel|CiInterval)$/);
+	let type = pick(/(ErrorBarType|ErrorType)$/);
+	let switchedOff = pick(/(ErrorBars?|PlotCi)$/) === false;
+	let percent = function (x) { return typeof x === "number" ? Math.round(x * 1000) / 10 + "%" : "95%"; };
+	let bayes = /Bayes/i.test(info.analysisName || "");
+	let within = (options.normalizeErrorBarsDescriptives === true || options.normalizeErrorBarsBarplot === true) && /RepeatedMeasures/.test(info.analysisName || "");
+
+	if (prefix && (hasBars || (!known && !switchedOff && type !== undefined))) {
+		if (type === "se")
+			return { text: i18n("Error bars represent standard errors") + (within ? i18n(", adjusted for the within-subjects design") : "") + "." };
+		if (type === "ci" || (bayes && level !== undefined))
+			return { text: i18n("Error bars represent") + " " + percent(level) + " " + (bayes ? i18n("credible intervals") : i18n("confidence intervals")) + (within ? i18n(", adjusted for the within-subjects design") : "") + "." };
+	}
+	if (hasBars)
+		return { todo: i18n("say what the error bars show") };
+	if (hasBand) {
+		let bandLevel = Object.keys(options).filter(function (k) { return /CiLevel$/.test(k) && options[k.replace(/Level$/, "")] === true; });
+		if (bandLevel.length === 1)
+			return { text: i18n("The shaded band shows the") + " " + percent(options[bandLevel[0]]) + " " + i18n("confidence interval") + "." };
+		return { todo: i18n("say what the shaded band shows") };
+	}
+	return null;
+}
+
+function buildAPAFigure(info, figureNumber) {
+	/**
+	 * Builds an APA 7 figure: "Figure N" in bold, the title in italic title case, the picture at a size where its
+	 * text lands at 8 to 14 pt, and a note (APA 7, 7.22 to 7.28).
+	 * @param info	{ title, containerTitles, image: { src, widthIn, heightIn }, options, analysisName, plotName,
+	 *				facts (what the plot draws, from the external tool), variables (the analysis's variable names),
+	 *				dataSampleSize ({ n } or { range }) }
+	 * @param figureNumber	number shown in "Figure N" (figures are numbered apart from tables)
+	 * @returns { html, text, todo, changes }
+	 */
+	let log = _apaChangeLog(null);
+	let todo = [];
+	let notes = [];
+
+	// Title: JASP's plot title, with the container's when the plot has none or only names a level ("Gender: Male")
+	let parts = (info.containerTitles || []).concat(info.title ? [info.title] : []).map(_apaPlain).filter(function (t) { return t.trim() !== ""; });
+	let raw = parts.join(": ");
+	let title = apaTitleCase(apaTidyLabel(raw, true).text).replace(/\bT-Test\b/g, "t Test");
+	let titleHtml = _apaEscape(title);
+	let variables = info.variables || [];
+	let namesVariable = variables.some(function (v) { return v && new RegExp("(^|\\W)" + v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\W|$)", "i").test(raw); });
+	if (!namesVariable || raw.trim() === "") {
+		titleHtml += (titleHtml ? " " : "") + _apaTodo(i18n("say what the figure shows"));
+		todo.push(i18n("make the title say what the figure shows"));
+	}
+	log.add(i18n("Title"), i18n("Figure number in bold, then the title in italic title case on the next line, both above the figure. APA wants the title to say what the figure shows (APA 7, 7.24)."), [{ from: _apaEscape(raw), to: titleHtml }]);
+
+	// Note: what the error bars or bands show, then the sample size
+	let interval = _apaFigureIntervalNote(info);
+	if (interval && interval.text) {
+		notes.push(interval.text);
+		log.add(i18n("Error bars"), i18n("The note says what the error bars or bands show, as APA asks (APA 7, 7.28)."), [{ from: "", to: interval.text }]);
+	}
+	else if (interval && interval.todo) {
+		notes.push(_apaTodo(interval.todo) + ".");
+		todo.push(interval.todo);
+	}
+	// Abbreviations in the figure (axis titles, legends, text in the plot) written out, as for tables (APA 7, 7.28)
+	let words = [raw];
+	for (let plot of ((info.facts && info.facts.plots) || []))
+		for (let key of ["x", "y", "colour", "fill", "shape", "linetype", "text"])
+			words = words.concat(plot[key] || []);
+	let figureText = words.filter(function (w) { return typeof w === "string"; }).map(function (w) {
+		// plotmath as R writes it: BF[10], BF["01"], italic(r) ~ "=" ~ ".578"
+		return w.replace(/BF\s*\[\s*"?10"?\s*\]/g, "BF₁₀").replace(/BF\s*\[\s*"?01"?\s*\]/g, "BF₀₁").replace(/[~"]/g, " ");
+	}).join(" | ");
+	let noteSoFar = _apaPlain(notes.join(" "));
+	let explained = [];
+	for (let abbreviation in apaAbbreviationMeanings) {
+		let pattern = new RegExp("(^|[^\\p{L}\\p{N}-])" + abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^\\p{L}\\p{N}-])", "u");
+		let meaning = apaAbbreviationMeanings[abbreviation];
+		if (pattern.test(figureText) && noteSoFar.indexOf(abbreviation + " =") === -1 && noteSoFar.toLowerCase().indexOf(meaning.toLowerCase()) === -1)
+			explained.push(abbreviation + " = " + meaning);
+	}
+	if (explained.length > 0) {
+		notes.push(_apaEscape(explained.join("; ")) + ".");
+		log.add(i18n("Abbreviations explained"), i18n("Abbreviations in the figure are written out in the note (APA 7, 7.28)."), [{ from: "", to: notes[notes.length - 1] }]);
+	}
+
+	let sample = info.dataSampleSize;
+	let count = function (n) { return n >= 1000 ? n.toLocaleString("en") : String(n); };
+	if (sample && sample.n !== undefined)
+		notes.push("<i>N</i> = " + count(sample.n) + ".");
+	else if (sample && sample.range)
+		notes.push("<i>N</i>s range from " + count(sample.range.min) + " to " + count(sample.range.max) + " because of missing values.");
+
+	// The picture: its own size in inches, so Word and Docs paste it with its text at 8 to 14 pt
+	let image = info.image || {};
+	let w = image.widthIn || 5, h = image.heightIn || 3.75;
+	let px = function (inches) { return Math.round(inches * 96); };
+	let img = '<img src="' + _apaEscape(image.src || "") + '" width="' + px(w) + '" height="' + px(h) + '" style="width: ' + w.toFixed(2) + 'in; height: ' + h.toFixed(2) + 'in;" alt="' + _apaEscape(title) + '">';
+
+	let noteLabel = i18n("Note.");
+	let html = '<div style="font-size: 12pt; font-weight: normal; font-style: normal;">';
+	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><b>' + _apaEscape(i18n("Figure")) + " " + figureNumber + "</b></p>";
+	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><i>' + titleHtml + "</i></p>";
+	html += '<p style="margin: 0 0 6pt 0;">' + img + "</p>";
+	if (notes.length > 0)
+		html += '<p style="margin: 6pt 0 0 0; font-weight: normal;"><i>' + _apaEscape(noteLabel) + "</i> " + notes.join(" ") + "</p>";
+	html += "</div>";
+	html = html.replace(/ data-apa-todo="1"/g, "");
+
+	let lines = [i18n("Figure") + " " + figureNumber, _apaPlain(titleHtml), "[" + i18n("figure") + "]"];
+	if (notes.length > 0)
+		lines.push(noteLabel + " " + _apaPlain(notes.join(" ")));
+	for (let change of log.changes)
+		for (let example of change.examples) {
+			let clean = function (s) { return s.replace(/<span data-apa-todo="1"[^>]*>([^<]*)<\/span>/g, "<mark>$1</mark>").replace(/ style="[^"]*"/g, ""); };
+			example.from = clean(example.from);
+			example.to = clean(example.to);
+		}
+	return { html: html, text: lines.join("\n"), todo: todo, changes: log.changes };
+}

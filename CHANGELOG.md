@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Features
-- **APA figures, first step** (Linux, command line only for now): `japasp --figures FILE.jasp` reruns the file's analyses in JASP's own R and draws every plot in APA style.
+- **APA figures** (Linux, with JASP's Flatpak): the file's plots appear below the tables as APA figures, numbered apart from the tables, each with a copy button. A plot is redrawn in APA style from your data when its rerun in JASP's own R matches JASP's results; otherwise JASP's own picture goes inside the APA title and note. `japasp --figures FILE.jasp` prints the same as JSON.
 
 ### Fixes
 - **On Windows the taskbar and Start menu icon follow the theme.** They stayed blue in dark mode, because Windows takes them from the big window icon and the shortcuts, which the app didn't change. A taskbar pin follows too.

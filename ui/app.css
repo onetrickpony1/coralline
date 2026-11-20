@@ -948,3 +948,11 @@ body.dragging .dropping { opacity: 1; }
    yellow dots, which share its class name, making them wider and lifting them) */
 .side-list a .t { flex: 1 1 0; min-width: 0; }
 .side-list a .mark { margin-left: auto; padding: 0; }
+
+/* Figures: plots as APA figures, below the tables */
+.figures { margin-top: 8px; }
+.figure-status { margin: 4px 6px 14px; color: var(--ink-2); font-size: 14px; }
+.figure-status.bad { color: var(--danger); }
+.figure-source { margin: 0 18px 8px; font-size: 13px; color: var(--ink-2); }
+.figure-source.redrawn { color: var(--ok); }
+.paper img { display: block; max-width: 100%; height: auto; }

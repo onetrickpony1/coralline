@@ -934,6 +934,46 @@ function test_apaChangeLog() {
 }
 
 // ========== Run all tests ==========
+// ========== buildAPAFigure ==========
+function test_buildAPAFigure() {
+	_reset();
+	var t = _assertEq;
+	var bars = { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomLine", "GeomPoint"] }] };
+
+	var anova = buildAPAFigure({ title: "", containerTitles: ["Descriptives Plots"], plotName: "anovaContainer_descriptivesContainer_containerDescriptivesPlots_", analysisName: "Anova",
+		options: { descriptivePlotErrorBar: true, descriptivePlotErrorBarType: "ci", descriptivePlotCiLevel: 0.95, barPlotErrorBarType: "se" },
+		facts: bars, variables: ["Attractiveness", "FaceType"], image: { src: "data:image/png;base64,AAAA", widthIn: 5, heightIn: 3.75 }, dataSampleSize: { n: 48 } }, 2);
+	t(anova.html.indexOf("<b>Figure 2</b>") !== -1, true, "figure: bold figure number");
+	t(anova.html.indexOf("Error bars represent 95% confidence intervals.") !== -1, true, "figure: CI error bars from the descriptives plot's own options, not the bar plot's");
+	t(anova.html.indexOf("<i>N</i> = 48.") !== -1, true, "figure: N in the note");
+	t(anova.html.indexOf('width="480"') !== -1 && anova.html.indexOf("width: 5.00in") !== -1, true, "figure: picture pasted at its APA size");
+	t(anova.todo.length, 1, "figure: a title that names no variable asks for one");
+	t(anova.text.split("\n")[0], "Figure 2", "figure: plain text starts with the number");
+
+	var rm = buildAPAFigure({ title: "Gender: Male", plotName: "rmAnovaContainer_descriptivesContainer_containerDescriptivesPlots_gender", analysisName: "AnovaRepeatedMeasures",
+		options: { descriptivePlotErrorBar: true, descriptivePlotErrorBarType: "se", normalizeErrorBarsDescriptives: true }, facts: bars, variables: ["Gender", "Looks"] }, 1);
+	t(rm.html.indexOf("Error bars represent standard errors, adjusted for the within-subjects design.") !== -1, true, "figure: within-subjects standard errors");
+	t(rm.todo.length, 0, "figure: a title naming a variable needs no reminder");
+
+	var bayes = buildAPAFigure({ title: "Descriptives Plot", plotName: "descriptivesContainer_containerDescriptivesPlots_", analysisName: "AnovaBayesian",
+		options: { descriptivePlotCi: true, descriptivePlotCiLevel: 0.9 }, facts: bars }, 1);
+	t(bayes.html.indexOf("Error bars represent 90% credible intervals.") !== -1, true, "figure: Bayesian error bars are credible intervals at their level");
+
+	var unknown = buildAPAFigure({ title: "Means", plotName: "customPlot", analysisName: "Something", options: {}, facts: bars }, 1);
+	t(unknown.todo.indexOf("say what the error bars show") !== -1, true, "figure: unexplained error bars ask the user");
+
+	var plain = buildAPAFigure({ title: "Q-Q Plot Standardized Residuals", plotName: "modelContainer_residualsQQPlot", analysisName: "RegressionLinear",
+		options: { qqPlotCi: false, qqPlotCiLevel: 0.95 }, facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomPoint"] }] } }, 3);
+	t(plain.html.indexOf("Error bars") === -1 && plain.html.indexOf("<i>Note.</i>") === -1, true, "figure: no note when there is nothing to explain");
+	t(plain.html.indexOf("<i>Q-Q Plot Standardized Residuals ") !== -1, true, "figure: title kept in title case, italic");
+
+	var robust = buildAPAFigure({ title: "Bayes Factor Robustness Check", plotName: "ttestContainer_inferentialPlots_drp_robustnessPlot", analysisName: "TTestBayesianIndependentSamples",
+		options: {}, facts: { panels: 2, plots: [{ geoms: ["GeomLine", "GeomPoint"], x: "Cauchy prior width", y: "BF[10]", text: ["max BF[10]"] }] }, variables: ["drp"] }, 4);
+	t(robust.html.indexOf("BF₁₀ = Bayes factor in favour of the alternative hypothesis.") !== -1, true, "figure: BF10 written as plotmath is explained in the note");
+	var ci = buildAPAFigure({ title: "drp", plotName: "x", analysisName: "TTestIndependentSamples", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], y: "Mean (95% CI)" }] }, variables: ["drp"] }, 1);
+	t(ci.html.indexOf("CI = confidence interval.") !== -1, true, "figure: CI in an axis title is explained");
+}
+
 function runAllUtilTests() {
 	utilsTestResults = [];
 	utilsTestPassed = 0;
@@ -956,6 +996,7 @@ function runAllUtilTests() {
 	test_formatColumn_mixed();
 	test_formatColumn_edges();
 	test_buildAPATable();
+	test_buildAPAFigure();
 	test_apaChangeLog();
 	test_apaMixedDf();
 	test_apaGroupsAndNotes();

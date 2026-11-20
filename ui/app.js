@@ -385,10 +385,11 @@
 			tables.appendChild(el("p", { class: "no-match", text: all.length === 0
 				? "This file has no analyses yet. Run them in JASP, save, and open the file again."
 				: plotsOnly === all.length
-					? "This file has " + plural(all.length, "analysis", "analyses") + ", but " + (all.length === 1 ? "it only makes" : "they only make") + " plots. jAPAsp turns results tables into APA tables."
+					? "This file has " + plural(all.length, "analysis", "analyses") + ", but " + (all.length === 1 ? "it only makes" : "they only make") + " plots." + (figures.available ? " Its plots are below, as APA figures." : " jAPAsp turns results tables into APA tables.")
 					: "None of this file's tables has anything to copy." }));
 		}
 		updateProgress();
+		renderFigures();
 
 		applyFilter();
 		watchCurrent();
@@ -1096,6 +1097,171 @@
 		return visibleItems()[0] || null;
 	}
 
+	// ---- Figures: the file's plots as APA figures ----
+	// The app reruns the analyses in JASP's own R (src-tauri/src/figures.rs) and gets back each plot redrawn in
+	// APA style, or JASP's own picture when the rerun can't be trusted. Figures are numbered apart from tables.
+
+	const figures = { token: 0, key: null, status: "idle", data: null, error: null, available: null };
+
+	function resetFigures() {
+		figures.token++;
+		figures.key = null;
+		figures.status = "idle";
+		figures.data = null;
+		figures.error = null;
+	}
+
+	// Starts a run for the open file, once per saved version of it (a reload after JASP saves starts a new one)
+	function startFigures() {
+		if (!tauri || !state.path)
+			return;
+		const key = state.path + "|" + state.stamp;
+		if (figures.key === key && figures.status !== "error")
+			return;
+		const go = function () {
+			const token = ++figures.token;
+			const path = state.path;
+			figures.key = key;
+			figures.status = "running";
+			figures.error = null;
+			renderFigures();
+			tauri.core.invoke("make_figures", { path: path }).then(function (data) {
+				if (token !== figures.token)
+					return;  // another file, or a newer save, took over
+				figures.status = "done";
+				figures.data = data;
+				renderFigures();
+			}, function (e) {
+				if (token !== figures.token)
+					return;
+				figures.status = "error";
+				figures.error = String(e && e.message || e);
+				renderFigures();
+			});
+		};
+		if (figures.available === null)
+			tauri.core.invoke("figures_available").then(function (ok) { figures.available = ok; if (ok) go(); }, function () { figures.available = false; });
+		else if (figures.available)
+			go();
+	}
+
+	// What the figure builder needs for one plot, from the run and the opened file
+	function figureInfo(fig, data) {
+		const analysis = (state.file.analyses || [])[fig.analysis - 1] || {};
+		const redrawn = fig.trusted && fig.src;
+		return {
+			title: fig.title || "",
+			containerTitles: fig.containerTitles || [],
+			image: redrawn
+				? { src: fig.src, widthIn: fig.widthIn, heightIn: fig.heightIn }
+				: { src: fig.original, widthIn: fig.originalWidthIn || fig.widthIn, heightIn: fig.originalHeightIn || fig.heightIn },
+			options: (data.options || [])[fig.analysis - 1] || {},
+			analysisName: analysis.name || "",
+			plotName: fig.name || "",
+			facts: redrawn ? fig.facts : null,  // facts describe our redraw, not JASP's picture
+			variables: analysis.variables || [],
+			dataSampleSize: analysis.sampleSize
+		};
+	}
+
+	function figureItems() {
+		const data = figures.data;
+		if (!data || !state.file)
+			return [];
+		let number = 0;
+		return (data.figures || []).filter(function (fig) { return fig.src || fig.original; }).map(function (fig, k) {
+			const item = { key: "f" + k, fig: fig, number: ++number, redrawn: !!(fig.trusted && fig.src) };
+			try {
+				item.apa = buildAPAFigure(figureInfo(fig, data), item.number);
+				// the title for the list and card head, without the to-do placeholder the figure itself carries
+				item.title = _apaPlain(item.apa.text.split("\n")[1] || "").replace(/\s*\[[^\]]*\]\s*$/, "") || "Untitled figure";
+			} catch (e) {
+				item.error = String(e && e.message || e);
+				item.title = fig.title || "Untitled figure";
+			}
+			return item;
+		});
+	}
+
+	function figureCard(item) {
+		const numberText = "Figure " + item.number;
+		const id = "figure-" + item.key;
+		const head = el("header", { class: "card-head" }, [
+			el("div", { class: "label" }, [el("span", { class: "num", text: numberText }), el("span", { class: "t", text: item.title, title: item.title })])
+		]);
+		const node = el("article", { class: "card glass figure-card", id: id, "aria-label": numberText + ", " + item.title }, [head]);
+		if (item.error) {
+			node.appendChild(el("div", { class: "error", text: "This figure couldn't be built: " + item.error }));
+			return node;
+		}
+		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs" }, [el("span", { class: "swap", text: "Copy APA figure" })]);
+		head.appendChild(el("div", { class: "actions" }, [button]));
+		const why = item.fig.why || item.fig.error || "";
+		node.appendChild(el("p", { class: "figure-source" + (item.redrawn ? " redrawn" : ""), text: item.redrawn
+			? "Redrawn in APA style from your data, and checked against JASP's results."
+			: "JASP's own picture" + (why ? ", because " + why : "") + ". The title and note around it are APA style." }));
+		const todo = item.apa.todo;
+		if (todo.length > 0)
+			node.appendChild(el("ul", { class: "info figure-todo" }, [el("li", { text: "Finish after pasting: " + todo.join("; ") + "." })]));
+		else
+			node.appendChild(el("div", { class: "todo ready", text: "Nothing to add. Ready to paste." }));
+		const paper = el("div", { class: "paper" });
+		paper.innerHTML = item.apa.html;
+		node.appendChild(el("div", { class: "tray" }, [paper]));
+		button.addEventListener("click", function () {
+			copyRaw(apaClipboardHTML(item.apa.html), item.apa.text).then(function () {
+				swapLabel(button, [tick(), "Copied"], function () { button.classList.remove("primary"); button.classList.add("done"); });
+				clearTimeout(button.back);
+				button.back = setTimeout(function () {
+					swapLabel(button, ["Copy APA figure"], function () { button.classList.add("primary"); button.classList.remove("done"); });
+				}, 2200);
+				toast(numberText + " copied. " + (todo.length > 0 ? "Paste it, then finish the " + highlightedParts(todo.length) + "." : "Paste it into your document."));
+			}, function (e) {
+				toast("Couldn't copy: " + (e && e.message || e), true);
+			});
+		});
+		return node;
+	}
+
+	// The figures section below the tables, and its list in the sidebar. Drawn again when a run starts or ends,
+	// and after every render of the tables (which clears the page).
+	function renderFigures() {
+		const tables = $id("tables"), side = $id("side");
+		const old = $id("figures"), oldList = $id("figureList");
+		if (old) old.remove();
+		if (oldList) oldList.remove();
+		if (!state.file || figures.status === "idle")
+			return;
+		const section = el("section", { id: "figures", class: "figures", "aria-label": "Figures" }, [el("h2", { class: "analysis-title", text: "Figures" })]);
+		if (figures.status === "running")
+			section.appendChild(el("p", { class: "figure-status", role: "status", text: "Redrawing this file's plots in APA style with JASP. This takes a minute or so; the tables above are ready now." }));
+		else if (figures.status === "error")
+			section.appendChild(el("p", { class: "figure-status bad", role: "status", text: "Couldn't redraw the plots: " + figures.error }));
+		else {
+			const items = figureItems();
+			if (items.length === 0)
+				section.appendChild(el("p", { class: "figure-status", text: "This file has no plots." }));
+			const list = el("details", { open: "", id: "figureList" }, [el("summary", { title: plural(items.length, "figure", "figures") }, [
+				el("span", { class: "g", text: "Figures" }), el("span", { class: "count", text: String(items.length) })])]);
+			for (const item of items) {
+				const card = figureCard(item);
+				section.appendChild(card);
+				const link = el("a", { href: "#" + card.id, title: item.title }, [
+					el("span", { class: "n", text: String(item.number) }), el("span", { class: "t", text: item.title }), el("span", { class: "mark" })]);
+				link.addEventListener("click", function (e) {
+					e.preventDefault();
+					card.scrollIntoView({ behavior: "smooth", block: "start" });
+					if (isNarrow())
+						setDrawer(false);
+				});
+				list.appendChild(link);
+			}
+			if (items.length > 0)
+				side.appendChild(list);
+		}
+		tables.appendChild(section);
+	}
+
 	// ---- Clipboard ----
 
 	function copyRaw(html, text) {
@@ -1309,6 +1475,7 @@
 
 	// Back to the start screen
 	function closeFile() {
+		resetFigures();
 		state.file = null;
 		state.path = null;
 		state.name = "";
@@ -1367,7 +1534,7 @@
 			else
 				show(file, baseName(path));
 			remember(path);
-			return tauri.core.invoke("file_stamp", { path: path }).then(function (stamp) { state.stamp = stamp; });
+			return tauri.core.invoke("file_stamp", { path: path }).then(function (stamp) { state.stamp = stamp; startFigures(); });
 		}, function (e) {
 			if (quiet)
 				throw e;  // reloads decide what to say, and must not report success
