@@ -23,6 +23,8 @@ jobs:
           awk -v v="$version" '$0 ~ "^## " v "( |$)" { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section for $version"; exit 1; }
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "jAPAsp $version" --notes-file notes.md
+          # The double-click installer, as a download (raw files open as text in a browser)
+          gh release upload "$GITHUB_REF_NAME" install.cmd --clobber
 
   build:
     name: ${{ matrix.asset }}

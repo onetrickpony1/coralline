@@ -4,46 +4,53 @@ jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results
 
 ![jAPAsp with the Album Sales example open](docs/screenshot.png)
 
+## What it does for you
+
+- Rounds every number the APA way and puts symbols like *M*, *SD* and *p* in italics.
+- Draws the table with APA's lines, adds "Table 1" and the *Note.* under it, with your sample size.
+- Marks in yellow the few things only you can add, such as a title that says what was measured, and shows you how.
+- Shows exactly what it changed, so you can check it: your results stay the same as in JASP.
+
 ## Features
 
 - **APA 7 layout:** "Table N" in bold, an italic title in title case, horizontal rules only, a *Note.* under the table.
-- **APA numbers:** 2 decimals, 3 for *p* values, no leading zero for statistics that can't exceed 1, commas in thousands, whole-number *df*.
+- **APA numbers:** 2 decimals, 3 for *p* values, no leading zero for statistics that can't exceed 1, commas in thousands, whole-number *df* where the *df* is whole.
 - **APA wording:** sentence-case headings, *M*, *SD*, *SE* and the other standard symbols in italics, readable variable names ("FaceType" becomes "Face type").
 - **Sample size:** *N* goes in the note. It comes from what the analysis reports or, when its tables don't say, from the data saved in the file (rows that pass the filter with no missing values in the analysis's variables).
 - **Layouts APA expects:** descriptive statistics with variables in rows, correlation matrices with numbered columns and asterisks instead of *p* rows.
-- **What only you can add is highlighted:** a vague title, a missing heading or an unclear abbreviation is marked in yellow in the pasted table, and listed under each table in the app.
+- **What only you can add is highlighted:** a vague title, a missing heading or an unclear abbreviation is marked in yellow in the pasted table. Under each table, click a to-do for what to write, with an example, and how to remove the yellow afterwards.
 - **Fits the page:** column widths are measured so nothing wraps, and wide tables step down to a smaller type size.
 
 In the app:
 
-- **Light, dark and pink themes**, or follow the system.
-- **Reloads when JASP saves the file**, keeping your place.
-- **Find and filter:** search tables by name, or show only the ones still to do or ready to paste. A ring shows how many are ready.
-- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns.
-- **Number the first table** to match your paper (start at Table 4 if three tables come before).
+- **Only the tables for your report:** assumption checks (normality, equal variances) start out of the numbering, and you can leave out or put back any table. The tables after it are renumbered.
+- **Copy one table or all of them**, for Word and Google Docs or as plain text with tabs between columns. The list shows which tables you've copied.
 - **See what changed:** **What changed** on each table (or <kbd>W</kbd>) lists every APA 7 rule that changed something, with each value before and after ("Std. Deviation" to *SD*, "0.3967" to ".40") and the APA section it comes from.
-- **Jump to each highlight** by clicking the to-do under a table. Hide highlights in the preview to check the layout (copies keep them).
+- **Reloads when JASP saves the file**, keeping your place. If the file can't be read, it says so and keeps trying.
+- **Find and filter:** search tables by name or number ("table 3"), or show only the tables still to copy.
+- **Number the first table** to match your paper (start at Table 4 if three tables come before). Each file remembers its own.
+- **Light, dark and pink themes**, or follow the system. Works in a narrow window too: the table list opens as a drawer.
 - **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
-- **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in.
+- **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in (needs a free GitHub account).
 - **Recent files**, preview size, and keyboard shortcuts for everything (press <kbd>?</kbd>).
 
 ## Install
 
-**Windows** (10 or 11):
+**Windows** (10 or 11): download [install.cmd](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/install.cmd) and double-click it. If Windows asks whether to run it, choose **Run** (or **More info**, then **Run anyway**). Run it again whenever you want to update.
 
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.ps1 | iex"
-```
-
-**Linux / macOS**:
+**Mac and Linux:** open Terminal, paste this line and press Return. Run it again to update.
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.sh | sh
 ```
 
-Run the same line again to update. You can also download `install.cmd` (Windows) or `install.command` (macOS) and double-click it.
+Or, on Windows, from PowerShell:
 
-- Windows: jAPAsp goes in `%LOCALAPPDATA%\Programs\japasp`, with a Start menu entry. It uses the WebView2 runtime that comes with Windows.
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.ps1 | iex"
+```
+
+- Windows: jAPAsp goes in `%LOCALAPPDATA%\Programs\japasp`, with a Start menu entry.
 - Linux: jAPAsp goes in `~/.local/share/japasp`, with an app menu entry and the `japasp` command in `~/.local/bin`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch); the installer tells you if it's missing.
 - macOS: installed like on Linux, started with `japasp`. It is built for macOS but not tested there.
 
@@ -52,7 +59,7 @@ Run the same line again to update. You can also download `install.cmd` (Windows)
 1. Save your work in JASP.
 2. Open the `.jasp` file in jAPAsp: drop it on the window, or click **Open JASP file**. You can also start it with a file: `japasp results.jasp`.
 3. Click **Copy APA table** on a table (or press <kbd>C</kbd>; <kbd>J</kbd> and <kbd>K</kbd> move between tables), then paste it into your document.
-4. Fix what is highlighted in yellow, then remove the highlight.
+4. Replace what is highlighted in yellow (click the to-do under the table for what to write), then remove the yellow: in Word, **Home › Text Highlight Colour › No Colour**; in Google Docs, the highlighter, then **None**.
 
 To see a file's tables as JSON instead: `japasp --json results.jasp`.
 
