@@ -467,11 +467,18 @@
 		const parts = [];
 		const p = function (html) { const node = el("p"); node.innerHTML = html; parts.push(node); };
 		const esc = function (t) { return _apaEscape(String(t)); };
-		const group = state.groups.find(function (g) { return g.items.indexOf(item) !== -1; });
-		const vars = (group && group.variables || []).slice(0, 3).map(function (v) { return apaSentenceCase(String(v).replace(/[_.]+/g, " "), true); });
-		const list = vars.length > 1 ? vars.slice(0, -1).join(", ") + " and " + vars[vars.length - 1] : vars[0] || "";
+		// Variables in the table's order. Short names the table asks to write out ("drp") become a prompt for the
+		// words, so the example is never copied with the code in it.
+		const namesTodo = item.apa.todo.find(function (t) { return /names:/.test(t); });
+		const unclear = namesTodo ? namesTodo.split(":")[1].split(",").map(function (w) { return w.trim().toLowerCase(); }) : [];
+		const vars = tableVariables(item).map(function (v) {
+			return unclear.indexOf(v.toLowerCase()) !== -1 ? "[what " + v + " measures]" : apaTitleCase(v);
+		});
+		// Up to four variables are named; more would make a long title
+		const list = vars.length === 0 ? "[what was measured]" : vars.length > 4 ? "the Study Variables"
+			: vars.length === 1 ? vars[0] : vars.slice(0, -1).join(", ") + " and " + vars[vars.length - 1];
 		if (kind === "title")
-			p("Write a short title that says what the table shows, in Title Case. For example: <i>" + esc(apaTitleCase(item.title + (list ? " for " + list : ""))) + (list ? "" : " of …") + "</i>. Replace the yellow text with it after pasting.");
+			p("Write a short title that says what the table shows, in Title Case. For example: <i>" + esc(item.title + " for " + list) + "</i>." + (vars.length > 4 ? " Naming all " + vars.length + " variables would make the title long; the table names them." : "") + " Use words, not JASP's column names. Replace the yellow text with it after pasting.");
 		else if (kind === "names") {
 			const word = (text.split(":")[1] || "").split(",")[0].trim();
 			p("Replace " + (word ? "<i>" + esc(word) + "</i>" : "each short name") + " with what it measures (for example, <i>Reading score</i>), or keep it and explain it in the note: <i>" + esc(word || "drp") + " = …</i>");
@@ -485,6 +492,23 @@
 		p("Then remove the yellow: in Word, Home › Text Highlight Colour › No Colour; in Google Docs, the highlighter › None.");
 		parts[parts.length - 1].className = "after";
 		return parts;
+	}
+
+	// The analysis's variables that this table shows, in the order it shows them, as the table writes them
+	function tableVariables(item) {
+		const group = state.groups.find(function (g) { return g.items.indexOf(item) !== -1; });
+		const lines = item.apa.text.split("\n").slice(2);
+		const noteAt = lines.findIndex(function (l) { return /^Note\./.test(l); });
+		const body = lines.slice(0, noteAt === -1 ? lines.length : noteAt).join("\n").toLowerCase();
+		const found = [];
+		for (const name of group && group.variables || []) {
+			const label = apaTidyLabel(String(name), true).text;
+			const match = new RegExp("(^|[^\\p{L}\\p{N}])" + label.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^\\p{L}\\p{N}])", "u").exec(body);
+			const at = match ? match.index : -1;
+			if (at !== -1 && !found.some(function (f) { return f.label === label; }))
+				found.push({ label: label, at: at });
+		}
+		return found.sort(function (a, b) { return a.at - b.at; }).map(function (f) { return f.label; });
 	}
 
 	// Neutral notes on a table: smaller type, and extras some courses don't use (not advice on what to report)
