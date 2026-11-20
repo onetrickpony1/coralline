@@ -134,8 +134,7 @@ body {
 	flex-direction: column;
 	overflow: hidden;
 }
-/* Theme changes fade, but only once the app has started, so the first frame is never animated */
-.started body { transition: background-color 0.4s var(--ease), color 0.4s var(--ease); }
+
 svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 kbd {
@@ -149,21 +148,23 @@ kbd {
 }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* The light behind the glass: three soft pools of colour, fixed */
-.ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.ambient i { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.85; }
-.started .ambient i { transition: background-color 0.6s var(--ease); }
-.ambient .b1 { width: 58vmax; height: 58vmax; left: -18vmax; top: -22vmax; background: var(--blob1); }
-.ambient .b2 { width: 50vmax; height: 50vmax; right: -16vmax; top: 8vmax; background: var(--blob2); }
-.ambient .b3 { width: 44vmax; height: 44vmax; left: 22vmax; bottom: -26vmax; background: var(--blob3); }
+/* The light behind the glass: three soft pools of colour. Plain gradients, painted once: no blur filter,
+   no animation, so nothing behind the panels ever has to be redrawn. */
+body {
+	background:
+		radial-gradient(62vmax 62vmax at 4% -6%, color-mix(in oklch, var(--blob1) 90%, transparent), transparent 70%),
+		radial-gradient(54vmax 54vmax at 104% 34%, color-mix(in oklch, var(--blob2) 90%, transparent), transparent 70%),
+		radial-gradient(50vmax 50vmax at 46% 112%, color-mix(in oklch, var(--blob3) 90%, transparent), transparent 70%),
+		var(--field);
+}
 
 /* ---- Glass ---- */
 
+/* Panes are translucent over the static background, which gives the glass look without a live blur.
+   Only panes that float over moving content (the menu, the shortcuts sheet) blur what is behind them. */
 .glass {
 	position: relative;
 	background: var(--glass);
-	-webkit-backdrop-filter: var(--blur);
-	backdrop-filter: var(--blur);
 	border: 1px solid var(--edge);
 	box-shadow: inset 0 1px 0 var(--sheen), inset 0 -1px 0 var(--edge-low), var(--shadow);
 }
@@ -179,7 +180,7 @@ kbd {
 }
 .glass > * { position: relative; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-	.glass { background: var(--glass-solid); }
+	.menu, .keys { background: var(--glass-solid); }
 }
 
 /* ---- Buttons ---- */
@@ -493,8 +494,8 @@ main { flex: 1; min-height: 0; display: flex; }
 	min-width: 0;
 	overflow: auto;
 	padding: 2px 6px 96px 2px;
-	scroll-behavior: smooth;
 	scroll-padding-top: 4px;
+	overscroll-behavior: contain;
 	outline: none;
 }
 .analysis-title { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; margin: 22px 4px 10px; }
@@ -508,7 +509,7 @@ main { flex: 1; min-height: 0; display: flex; }
 	margin: 0 0 14px;
 	overflow: hidden;
 	scroll-margin-top: 4px;
-	transition: box-shadow 0.25s var(--ease);
+	contain: layout paint;   /* a card's changes never make the rest of the page redraw */
 }
 .card.current { box-shadow: inset 0 1px 0 var(--sheen), 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow); }
 .card-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 18px; flex-wrap: wrap; }
@@ -575,6 +576,8 @@ body.dragging .dropping { opacity: 1; }
 .toast.bad { color: var(--danger); }
 
 .keys {
+	-webkit-backdrop-filter: var(--blur);
+	backdrop-filter: var(--blur);
 	border: 1px solid var(--edge);
 	border-radius: var(--r-lg);
 	padding: 22px 24px 18px;
@@ -620,12 +623,20 @@ body.dragging .dropping { opacity: 1; }
 	-webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 24px), transparent 100%);
 	mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 24px), transparent 100%);
 }
-.tables {
-	-webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 40px), transparent 100%);
-	mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 40px), transparent 100%);
-}
 
 /* Copy -> Copied: the label blurs out and the new one blurs in */
 .btn .swap { display: inline-flex; align-items: center; gap: 6px; transition: filter 0.14s var(--ease), opacity 0.14s var(--ease), transform 0.14s var(--ease); }
 .btn .swap.out { filter: blur(4px); opacity: 0; transform: scale(0.9); }
 .btn .swap svg { width: 15px; height: 15px; stroke-width: 2.2; }
+
+/* Reduce effects: for slower computers, or when the system asks for less motion or transparency.
+   Solid panes, no shadows, sheen, fades or animation. */
+.reduced .glass, .reduced .menu, .reduced .keys { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+.reduced .glass::before { display: none; }
+.reduced .card.current { box-shadow: 0 0 0 2px var(--accent); }
+.reduced .paper { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.reduced .tray { box-shadow: none; }
+.reduced .btn.primary { background: var(--accent); box-shadow: none; }
+.reduced .side-list { -webkit-mask-image: none; mask-image: none; }
+.reduced body { background: var(--field); }
+.reduced *, .reduced *::before, .reduced *::after { transition: none !important; animation: none !important; }

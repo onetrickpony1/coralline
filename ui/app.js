@@ -40,6 +40,7 @@
 		highlights: settings.read("highlights", true),
 		autoReload: settings.read("autoReload", true),
 		start: settings.read("start", 1),
+		reduced: root.classList.contains("reduced"),   // set by theme-boot.js before the first paint
 		recent: settings.read("recent", [])
 	};
 
@@ -175,6 +176,7 @@
 
 		const groups = build(state.file, state.start);
 		state.groups = groups;
+		shownCurrent = null;
 		const side = $id("side");
 		side.textContent = "";
 		tables.textContent = "";
@@ -276,7 +278,11 @@
 			return;
 		item.spot = ((item.spot === undefined ? -1 : item.spot) + 1) % spots.length;
 		const spot = spots[item.spot];
-		spot.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+		const box = $id("tables");
+		scrollTablesTo(box.scrollTop + spot.getBoundingClientRect().top - box.getBoundingClientRect().top - box.clientHeight / 2);
+		const tray = spot.closest(".tray");
+		if (tray && tray.scrollWidth > tray.clientWidth)
+			tray.scrollLeft += spot.getBoundingClientRect().left - tray.getBoundingClientRect().left - tray.clientWidth / 2;
 		spot.classList.remove("flash");
 		void spot.offsetWidth;
 		spot.classList.add("flash");
@@ -348,19 +354,68 @@
 		for (const group of state.groups)
 			for (const item of group.items)
 				observer.observe(item.card);
-		watchCurrent.pause = function () { suppressUntil = Date.now() + 700; };
+		watchCurrent.pause = function () { suppressUntil = Date.now() + 800; };
 	}
 
+	function itemById(id) {
+		for (const group of state.groups)
+			for (const item of group.items)
+				if (item.id === id)
+					return item;
+		return null;
+	}
+
+	// Only the old and the new table change, so following the scroll costs almost nothing
+	let shownCurrent = null;
 	function setCurrent(id, fromScroll) {
 		state.current = id;
-		for (const group of state.groups)
-			for (const item of group.items) {
-				const on = item.id === id;
-				item.card.classList.toggle("current", on);
-				item.link.classList.toggle("current", on);
-				if (on && fromScroll)
-					item.link.scrollIntoView({ block: "nearest" });
-			}
+		const item = itemById(id);
+		if (shownCurrent === item)
+			return;
+		if (shownCurrent) {
+			shownCurrent.card.classList.remove("current");
+			shownCurrent.link.classList.remove("current");
+		}
+		shownCurrent = item;
+		if (item) {
+			item.card.classList.add("current");
+			item.link.classList.add("current");
+			if (fromScroll)
+				keepLinkInView(item.link);
+		}
+	}
+
+	// Scrolls the sidebar (not the page) just enough to show a link
+	function keepLinkInView(link) {
+		const list = $id("side");
+		const top = link.offsetTop - list.offsetTop, bottom = top + link.offsetHeight;
+		if (top < list.scrollTop + 8)
+			list.scrollTop = top - 8;
+		else if (bottom > list.scrollTop + list.clientHeight - 24)
+			list.scrollTop = bottom - list.clientHeight + 24;
+	}
+
+	// Eased scrolling, one step per frame. The engine's own smooth scrolling is jumpy in WebKitGTK.
+	let scrollAnimation = 0;
+	function scrollTablesTo(target) {
+		const box = $id("tables");
+		target = Math.max(0, Math.min(target, box.scrollHeight - box.clientHeight));
+		cancelAnimationFrame(scrollAnimation);
+		const from = box.scrollTop, distance = target - from;
+		if (state.reduced || Math.abs(distance) < 2) {
+			box.scrollTop = target;
+			return;
+		}
+		const duration = Math.min(560, 260 + Math.abs(distance) * 0.12);
+		const start = performance.now();
+		const ease = function (x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+		const frame = function (now) {
+			const p = Math.min(1, (now - start) / duration);
+			box.scrollTop = from + distance * ease(p);
+			if (p < 1)
+				scrollAnimation = requestAnimationFrame(frame);
+		};
+		scrollAnimation = requestAnimationFrame(frame);
 	}
 
 	function goTo(id) {
@@ -370,7 +425,8 @@
 		if (watchCurrent.pause)
 			watchCurrent.pause();
 		setCurrent(id);
-		node.scrollIntoView({ block: "start", behavior: "smooth" });
+		const box = $id("tables");
+		scrollTablesTo(box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - 4);
 	}
 
 	function step(delta) {
@@ -380,8 +436,7 @@
 		const at = items.findIndex(function (i) { return i.id === state.current; });
 		const next = items[Math.max(0, Math.min(items.length - 1, at + delta))];
 		goTo(next.id);
-		const link = next.link;
-		link.scrollIntoView({ block: "nearest" });
+		keepLinkInView(next.link);
 	}
 
 	function currentItem() {
@@ -626,6 +681,11 @@
 		}
 	});
 	$id("showHighlights").addEventListener("change", function () { setHighlights(this.checked); });
+	$id("reduceEffects").addEventListener("change", function () {
+		state.reduced = this.checked;
+		settings.write("reduced", this.checked);
+		root.classList.toggle("reduced", this.checked);
+	});
 	$id("autoReload").addEventListener("change", function () {
 		state.autoReload = this.checked;
 		settings.write("autoReload", this.checked);
@@ -718,6 +778,7 @@
 	setZoom(state.zoom);
 	setHighlights(state.highlights);
 	$id("autoReload").checked = state.autoReload;
+	$id("reduceEffects").checked = state.reduced;
 	$id("startNumber").value = String(state.start);
 	drawRecent();
 	updateMenu();
