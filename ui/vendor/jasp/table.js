@@ -2245,10 +2245,17 @@ function buildAPATable(tableElement, info, tableNumber) {
 	// Last resort: a count from the data, when the caller has one ({ n } or { varies: true })
 	// A count from the data (the external tool passes one) is exact for the rows the analysis used, so it wins
 	// over numbers worked out from the tables; only N shown in the table itself stays
-	if (!sample.shown && info.dataSampleSize && (info.dataSampleSize.n !== undefined || (sample.n === undefined && !sample.varies)))
-		sample = info.dataSampleSize;
+	// ({ n }, { range: { min, max } } when each test has its own N, or "varies")
+	let fromData = info.dataSampleSize;
+	if (fromData === "varies")
+		fromData = { varies: true };
+	if (!sample.shown && fromData && (fromData.n !== undefined || fromData.range || (sample.n === undefined && !sample.varies)))
+		sample = fromData;
+	let count = function (n) { return n >= 1000 ? n.toLocaleString("en") : String(n); };
 	if (sample.n !== undefined)
-		notes.general.unshift("<i>N</i> = " + (sample.n >= 1000 ? sample.n.toLocaleString("en") : sample.n) + ".");
+		notes.general.unshift("<i>N</i> = " + count(sample.n) + ".");
+	else if (sample.range)
+		notes.general.unshift("<i>N</i>s range from " + count(sample.range.min) + " to " + count(sample.range.max) + " because of missing values.");
 	else if (!sample.shown) {
 		notes.general.unshift("<i>N</i> = " + _apaTodo(sample.varies ? i18n("sample sizes differ, give each") : i18n("add sample size")) + ".");
 		todo.push(sample.varies ? i18n("give the sample sizes, they differ between variables") : i18n("add the sample size"));

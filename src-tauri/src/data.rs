@@ -15,7 +15,9 @@ use std::collections::BTreeSet;
 pub enum SampleSize {
     /// One N for the whole analysis
     N(u64),
-    /// Variables have different numbers of values
+    /// Each test has its own N, from min to max (missing values handled per variable or pair)
+    Range { min: u64, max: u64 },
+    /// Variables have different numbers of values, and how they combine isn't known
     Varies,
 }
 
@@ -92,8 +94,14 @@ impl Data {
         let empties = self.empty_values.iter().map(quote).collect::<Vec<_>>().join(", ");
         // Every value has a label row, "" when it has no label: only real labels can mark a missing value
         let empty_labels = self.empty_values.iter().filter(|v| !v.is_empty()).map(quote).collect::<Vec<_>>().join(", ");
-        // Nominal and ordinal columns mark a missing level with -1, unless -1 is a real level
-        let no_level = if self.categorical.contains(column) {
+        // Coded columns (nominal, ordinal, or any column with value labels) mark a missing value with -1,
+        // unless -1 is a real code
+        let coded = self.categorical.contains(column)
+            || self
+                .connection
+                .query_row("SELECT EXISTS (SELECT 1 FROM Labels WHERE columnId = ?1)", [id], |r| r.get::<_, bool>(0))
+                .unwrap_or(false);
+        let no_level = if coded {
             format!(" AND (\"{column}\" <> -1 OR EXISTS (SELECT 1 FROM Labels WHERE columnId = {id} AND value = -1))")
         } else {
             String::new()
@@ -115,37 +123,149 @@ impl Data {
             .query_row(&format!("SELECT COUNT(*) FROM \"{}\" WHERE {condition}", self.table), [], |r| r.get(0))
     }
 
-    /// N for an analysis, from its options. None when it uses no known variables.
+    fn sum(&self, count_column: &str, columns: &[&str]) -> rusqlite::Result<u64> {
+        let mut conditions: Vec<String> = columns.iter().map(|c| self.present(c)).collect();
+        conditions.push(self.present(count_column));
+        if let Some(filter) = &self.filter {
+            conditions.push(format!("\"{filter}\" = 1"));
+        }
+        // Columns with value labels store codes: the number itself is the label's original value
+        let id = self.columns.iter().find(|(_, s, _)| s == count_column).map_or(-1, |(_, _, id)| *id);
+        let value = format!(
+            "COALESCE((SELECT CAST(originalValueJson AS REAL) FROM Labels WHERE columnId = {id} AND value = \"{count_column}\" LIMIT 1), CAST(\"{count_column}\" AS REAL))"
+        );
+        let total: f64 = self.connection.query_row(
+            &format!("SELECT COALESCE(SUM({value}), 0) FROM \"{}\" WHERE {}", self.table, conditions.join(" AND ")),
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(total.round() as u64)
+    }
+
+    /// Rows with a value in at least one of the columns (what full-information maximum likelihood uses)
+    fn count_any(&self, columns: &[&str]) -> rusqlite::Result<u64> {
+        let any = columns.iter().map(|c| format!("({})", self.present(c))).collect::<Vec<_>>().join(" OR ");
+        let filter = self.filter.as_ref().map_or("1".to_string(), |f| format!("\"{f}\" = 1"));
+        self.connection
+            .query_row(&format!("SELECT COUNT(*) FROM \"{}\" WHERE ({any}) AND {filter}", self.table), [], |r| r.get(0))
+    }
+
+    /// Names in an option's value that are columns of the dataset
+    fn columns_in(&self, value: Option<&Value>) -> Vec<String> {
+        let mut names = BTreeSet::new();
+        if let Some(v) = value {
+            strings(v, &mut names);
+        }
+        names.into_iter().filter(|n| self.stored(n).is_some()).collect()
+    }
+
+    /// N for an analysis, from its options. None when it uses no known variables or rows aren't cases.
     pub fn sample_size(&self, options: &Value) -> Option<SampleSize> {
         // Wide-format measurement data (quality control) has several measurements per row: rows aren't N
         if options.get("dataFormat").and_then(Value::as_str) == Some("wideFormat") {
             return None;
         }
-        // With a counts, frequency or weights variable, each row stands for many cases: rows aren't N
-        for key in ["counts", "count", "frequency", "weights", "weight", "frequencyVariable", "countVariable"] {
-            let mut weighted = BTreeSet::new();
-            if let Some(value) = options.get(key) {
-                strings(value, &mut weighted);
-            }
-            if weighted.iter().any(|n| self.stored(n).is_some()) {
-                return None;
-            }
-        }
         let mut names = BTreeSet::new();
         variables(options, &mut names);
-        let stored: Vec<&str> = names.iter().filter_map(|n| self.stored(n)).collect();
-        if stored.is_empty() {
+        let mut known: Vec<String> = names.into_iter().filter(|n| self.stored(n).is_some()).collect();
+        if known.is_empty() {
+            // Models written as syntax (SEM) don't mark their variables: take option values that are column names
+            // (only from JASP's variable lists, { types, value }, so a plot title can't pass for a column)
+            let mut all = BTreeSet::new();
+            variable_lists(options, &mut all);
+            known = all.into_iter().filter(|n| self.stored(n).is_some()).collect();
+        }
+        if known.is_empty() {
             return None;
         }
+
+        // Frequency data: each row stands for as many cases as its count, so N is the sum of the counts.
+        // (Weights in regression and GLM don't make rows into cases: those rows are counted as usual.)
+        for key in ["counts", "count", "frequency", "frequencyVariable", "countVariable"] {
+            if let Some(counts) = self.columns_in(options.get(key)).first() {
+                let counts_stored = self.stored(counts)?.to_string();
+                let rest: Vec<&str> = known.iter().filter(|n| *n != counts).filter_map(|n| self.stored(n)).collect();
+                return self.sum(&counts_stored, &rest).ok().map(SampleSize::N);
+            }
+        }
+
+        let stored: Vec<&str> = known.iter().filter_map(|n| self.stored(n)).collect();
         let complete = self.count(&stored).ok()?;
         let rows = self.count(&[]).ok()?;
         let any_missing = stored.iter().any(|c| self.count(&[c]).map_or(true, |n| n != rows));
-        let listwise = options.get("naAction").and_then(Value::as_str).is_none_or(|a| a == "listwise");
-        if !any_missing || listwise {
-            Some(SampleSize::N(complete))
-        } else {
-            Some(SampleSize::Varies)
+        let na_action = options.get("naAction").and_then(Value::as_str);
+        if !any_missing || na_action.is_none_or(|a| a == "listwise") {
+            return Some(SampleSize::N(complete));
         }
+        if na_action == Some("fiml") {
+            return self.count_any(&stored).ok().map(SampleSize::N);
+        }
+
+        // Each test uses its own rows: work out the N of every test
+        let mut sizes = Vec::new();
+        let dependents = self.columns_in(options.get("dependent"));
+        let pairs: Vec<Vec<String>> = options
+            .get("pairs")
+            .and_then(|p| p.get("value").or(Some(p)))
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|pair| pair.as_array())
+                    .map(|pair| pair.iter().filter_map(|v| v.as_str()).filter(|n| self.stored(n).is_some()).map(str::to_string).collect())
+                    .filter(|pair: &Vec<String>| pair.len() == 2)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if na_action == Some("perDependent") && !pairs.is_empty() {
+            // Paired tests: each pair of measures has its own rows
+            for pair in &pairs {
+                let columns: Vec<&str> = pair.iter().filter_map(|n| self.stored(n)).collect();
+                sizes.push(self.count(&columns).ok()?);
+            }
+        } else if na_action == Some("perDependent") && !dependents.is_empty() {
+            let others: Vec<&str> = known.iter().filter(|n| !dependents.contains(n)).filter_map(|n| self.stored(n)).collect();
+            for dependent in &dependents {
+                let mut columns = others.clone();
+                columns.push(self.stored(dependent)?);
+                sizes.push(self.count(&columns).ok()?);
+            }
+        } else if na_action == Some("pairwise") {
+            let pair_vars = self.columns_in(options.get("variables"));
+            let partial: Vec<&str> = self.columns_in(options.get("partialOutVariables")).iter().filter_map(|n| self.stored(n)).collect();
+            for (i, a) in pair_vars.iter().enumerate() {
+                for b in &pair_vars[i + 1..] {
+                    let mut columns = partial.clone();
+                    columns.push(self.stored(a)?);
+                    columns.push(self.stored(b)?);
+                    sizes.push(self.count(&columns).ok()?);
+                }
+            }
+        }
+        match (sizes.iter().min(), sizes.iter().max()) {
+            (Some(&min), Some(&max)) if min == max => Some(SampleSize::N(min)),
+            (Some(&min), Some(&max)) => Some(SampleSize::Range { min, max }),
+            _ => Some(SampleSize::Varies),
+        }
+    }
+}
+
+/// Strings in every { types, value } object anywhere in the options: JASP's format for lists of variables
+fn variable_lists(value: &Value, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Object(map) => {
+            if map.contains_key("types") {
+                if let Some(v) = map.get("value") {
+                    strings(v, out);
+                }
+            }
+            for (key, v) in map {
+                if key != ".meta" {
+                    variable_lists(v, out);
+                }
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|v| variable_lists(v, out)),
+        _ => {}
     }
 }
 
@@ -191,11 +311,11 @@ pub(crate) mod tests {
             "CREATE TABLE DataSets (id INTEGER PRIMARY KEY);
              CREATE TABLE Filters (id INTEGER PRIMARY KEY, dataSet INT);
              CREATE TABLE Columns (id INTEGER PRIMARY KEY, dataSet INT, name TEXT, columnType TEXT);
-             CREATE TABLE Labels (id INTEGER PRIMARY KEY, columnId INT, value INT, label TEXT);
+             CREATE TABLE Labels (id INTEGER PRIMARY KEY, columnId INT, value INT, label TEXT, originalValueJson TEXT);
              INSERT INTO DataSets VALUES (1);
              INSERT INTO Filters VALUES (1, 1);
              INSERT INTO Columns VALUES (1, 1, 'x', 'scale'), (2, 1, 'y', 'scale'), (3, 1, 'group', 'nominal'), (4, 1, 'z', 'scale'), (5, 1, 'sex', 'nominal'), (6, 1, 'w', 'scale'), (7, 1, 'g2', 'nominal');
-             INSERT INTO Labels VALUES (1, 5, 0, 'F'), (2, 5, 1, 'M'), (3, 5, 2, '.'), (4, 2, 2, ''), (5, 2, 3, '');
+             INSERT INTO Labels VALUES (1, 5, 0, 'F', 'F'), (2, 5, 1, 'M', 'M'), (3, 5, 2, '.', '.'), (4, 2, 2, '', '2'), (5, 2, 3, '', '3');
              CREATE TABLE DataSet_1 (rowNumber INTEGER PRIMARY KEY, Filter_1 INT NOT NULL DEFAULT 1, Column_1 NUM NULL, Column_2 NUM NULL, Column_3 NUM NULL, Column_4 NUM NULL, Column_5 INT NULL, Column_6 NUM NULL, Column_7 INT NULL);
              INSERT INTO DataSet_1 VALUES (1, 1, 1.0, 2.0, 0, 'nan', 0, -1, 0), (2, 1, NULL, 3.0, 1, 1.5, 2, -1, -1), (3, 1, 2.0, 4.0, 0, 2.5, 1, 2, 1), (4, 1, 3.0, 5.0, -2147483648, 3.5, 0, 3, 0), (5, 0, 4.0, 6.0, 1, 4.5, 1, 4, 1);",
         )
@@ -237,8 +357,19 @@ pub(crate) mod tests {
         let path = dir.path().join("d.sqlite");
         sample_db(&path);
         let data = Data::open(&path).unwrap();
+        // x and y: one pair, x is missing once -> one N
         let o = options(json!({ "types": ["scale", "scale"], "value": ["x", "y"] }), Some("pairwise"));
-        assert_eq!(data.sample_size(&o), Some(SampleSize::Varies));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(3)));
+        // x, y, w: pairs (x,y)=3, (x,w)=3, (y,w)=4 -> 3 to 4
+        let o = options(json!({ "types": ["scale", "scale", "scale"], "value": ["x", "y", "w"] }), Some("pairwise"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::Range { min: 3, max: 4 }));
+        // per dependent with a grouping variable: x with group (2), y with group (3)
+        let o = json!({ ".meta": { "dependent": { "shouldEncode": true }, "group": { "shouldEncode": true } },
+            "dependent": { "types": ["scale", "scale"], "value": ["x", "y"] }, "group": { "types": ["nominal"], "value": "group" }, "naAction": "perDependent" });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::Range { min: 2, max: 3 }));
+        // full-information maximum likelihood uses every row with any value
+        let o = options(json!({ "types": ["scale", "scale"], "value": ["x", "z"] }), Some("fiml"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(4)));
     }
 
     #[test]
@@ -264,18 +395,61 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_counts_variable_means_rows_are_not_cases() {
+    fn counts_add_up_and_weights_do_not() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("d.sqlite");
         sample_db(&path);
         let data = Data::open(&path).unwrap();
+        // y as the counts, group as the factor: rows 1-3 pass (row 4 has no group, row 5 is filtered) -> 2 + 3 + 4
+        let mut o = options(json!({ "types": ["nominal"], "value": ["group"] }), None);
+        o["count"] = json!({ "types": ["scale"], "value": "y" });
+        o[".meta"]["count"] = json!({ "shouldEncode": true });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(9)));
+        // weights in a regression don't change N
         let mut o = options(json!({ "types": ["scale"], "value": ["y"] }), None);
-        o["counts"] = json!({ "types": ["scale"], "value": "x" });
-        assert_eq!(data.sample_size(&o), None);
+        o["weights"] = json!({ "types": ["scale"], "value": "x" });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(4)));
+        let mut o = options(json!({ "types": ["scale"], "value": ["y"] }), None);
         o["counts"] = json!({ "types": [], "value": "" });  // the option is there but empty
         assert_eq!(data.sample_size(&o), Some(SampleSize::N(4)));
         o["dataFormat"] = json!("wideFormat");
         assert_eq!(data.sample_size(&o), None);
+    }
+
+    #[test]
+    fn coded_counts_add_up_their_real_values_and_pairs_get_their_own_n() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let c = Connection::open(&path).unwrap();
+        // column 8: counts stored as codes 1..2 meaning 10 and 20; a -1 code is missing
+        c.execute_batch(
+            "INSERT INTO Columns VALUES (8, 1, 'freq', 'scale');
+             INSERT INTO Labels VALUES (10, 8, 1, '', '10'), (11, 8, 2, '', '20');
+             ALTER TABLE DataSet_1 ADD COLUMN Column_8 INT NULL;
+             UPDATE DataSet_1 SET Column_8 = CASE rowNumber WHEN 1 THEN 1 WHEN 2 THEN 2 WHEN 3 THEN -1 ELSE 1 END;",
+        )
+        .unwrap();
+        drop(c);
+        let data = Data::open(&path).unwrap();
+        // factor y (all present in rows 1-4), counts: 10 + 20 + (missing) + 10
+        let mut o = options(json!({ "types": ["scale"], "value": ["y"] }), None);
+        o["counts"] = json!({ "types": ["scale"], "value": "freq" });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(40)));
+        // pairs: (x, y) = 3 rows, (y, w) = 4 rows
+        let o = json!({ ".meta": { "pairs": { "shouldEncode": true } }, "naAction": "perDependent",
+            "pairs": { "types": [["scale", "scale"], ["scale", "scale"]], "value": [["x", "y"], ["y", "w"]] } });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::Range { min: 3, max: 4 }));
+    }
+
+    #[test]
+    fn syntax_models_find_their_variables_in_the_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        sample_db(&path);
+        let data = Data::open(&path).unwrap();
+        let o = json!({ ".meta": { "models": {} }, "models": [{ "syntax": { "model": "f =~ y + w", "types": ["scale", "scale"], "value": ["y", "w"] } }] });
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(4)));
     }
 
     #[test]

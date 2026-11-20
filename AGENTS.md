@@ -6,7 +6,7 @@ General rules are in the owner's dev-conventions. This file holds only this proj
 ## Layout
 
 - `src-tauri/src/jasp.rs`: reads `analyses.json` from the `.jasp` zip and lists each analysis's tables in `.meta` order (the JSON keys are sorted, so key order is wrong).
-- `src-tauri/src/data.rs`: counts N from `internal.sqlite` (table `DataSet_<id>`, columns `Column_<Columns.id>`, `Filter_<id>` = 1 for included rows, missing = NULL or INT_MIN). Variables come from the options marked `shouldEncode` in `options['.meta']`. Gives no N for weighted data, and `Varies` with missing values unless `naAction` is listwise. Only a fallback: the tables' own numbers win.
+- `src-tauri/src/data.rs`: counts N from `internal.sqlite` (table `DataSet_<id>`, columns `Column_<Columns.id>`, `Filter_<id>` = 1 for included rows, missing = NULL or INT_MIN). Variables come from the options marked `shouldEncode` in `options['.meta']`. Frequency data (`count`/`counts` options) sums the counts, through `Labels.originalValueJson` when the column stores codes. A code of -1 is missing in any coded column. FIML counts rows with any value; perDependent, pairs and pairwise give a `Range` of per-test N. Syntax models (SEM) fall back to `{ types, value }` lists anywhere in the options. Wide-format quality-control data gets no N. Only a fallback: the tables' own numbers win.
 - `src-tauri/src/app.rs`: the window, file opening and the clipboard (arboard, HTML plus plain text). Behind the `app` feature.
 - `ui/app.js`: builds a JASP table model per table, renders it with JASP's code, runs `buildAPATable`, shows cards.
 - `ui/vendor/jasp/`: JASP's own results-page code, copied by `tools/sync-jasp-js.sh`.
