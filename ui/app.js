@@ -351,11 +351,15 @@
 				});
 				entry.appendChild(pairs);
 				if (change.examples.length > 6) {
-					const more = el("button", { type: "button", class: "more", text: "Show " + (change.examples.length - 6) + " more" });
+					const extra = change.examples.length - 6;
+					const more = el("button", { type: "button", class: "more", "aria-expanded": "false", text: "Show " + extra + " more" });
 					more.addEventListener("click", function () {
-						for (const row of pairs.children)
-							row.hidden = false;
-						more.remove();
+						const open = more.getAttribute("aria-expanded") !== "true";
+						Array.from(pairs.children).forEach(function (row, i) { row.hidden = !open && i >= 6; });
+						more.setAttribute("aria-expanded", String(open));
+						more.textContent = open ? "Show less" : "Show " + extra + " more";
+						if (!open && more.getBoundingClientRect().top < 0)
+							entry.scrollIntoView({ block: "nearest", behavior: state.reduced ? "auto" : "smooth" });
 					});
 					entry.appendChild(more);
 				}
