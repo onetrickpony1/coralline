@@ -61,6 +61,10 @@
 					entry.problems.push("crash: " + item.error);
 					return;
 				}
+				if (item.failed) {  // empty or failed in JASP: shown as such, nothing to check
+					entry.skipped = item.failed;
+					return;
+				}
 				var apa = item.apa;
 				entry.todo = apa.todo;
 				entry.html = apa.html;

@@ -34,13 +34,13 @@
 		filter: "all",
 		query: "",
 		current: null,       // id of the table the keyboard acts on
-		copied: new Set(),   // table numbers copied this session
+		copied: new Set(),   // keys of the tables copied since this file was opened (kept across reloads)
+		files: settings.read("files", {}),   // per file: { start, out: [keys left out], in: [checks put back in] }
 		theme: settings.read("theme", "system"),
 		zoom: settings.read("zoom", 1),
 		highlights: settings.read("highlights", true),
 		sidebar: settings.read("sidebar", true),     // the table list on the left is shown
 		autoReload: settings.read("autoReload", true),
-		start: settings.read("start", 1),
 		reduced: root.classList.contains("reduced"),
 		appIcon: settings.read("appIcon", "theme"),   // "theme", or a fixed "blue", "dark" or "pink"
 		shownIcon: null,   // set by theme-boot.js before the first paint
@@ -49,11 +49,7 @@
 
 	// ---- Building the APA tables ----
 
-	function tableModels(analysis) {
-		return analysis.tables
-			.filter(function (t) { return t && t.schema && t.data && t.status !== "error"; })
-			.map(function (t) { return new JASPWidgets.table(t); });
-	}
+	function usable(t) { return !!(t && t.schema && t.data && t.data.length > 0 && t.status !== "error"); }
 
 	function plainTable(model) {
 		const view = new JASPWidgets.tablePrimitive({ model: model });
@@ -61,33 +57,87 @@
 		return view.$el.find("table").get(0);
 	}
 
-	// Returns [{ title, items: [{ number, title, apa | error }] }], numbering tables across the whole file
+	// Tables that check a test's assumptions or diagnose a model. Most papers leave them out, so they start out of the
+	// numbering; one click puts them back.
+	const checkTitles = /^(Test of Normality|Assumption Checks|Tests? of Equality of Variances|Levene|Shapiro|Test of Sphericity|Homogeneity|Collinearity Diagnostics|Casewise Diagnostics|Influential Cases|Residuals Statistics|Q-Q|Multicollinearity)/i;
+
+	// What the reader settings for the open file are (table numbering, left-out tables)
+	function fileKey() { return state.path || state.name || ""; }
+	function fileSettings() {
+		const saved = state.files[fileKey()] || {};
+		return { start: saved.start || 1, out: saved.out || [], in: saved.in || [] };
+	}
+	function saveFileSettings(change) {
+		const next = Object.assign(fileSettings(), change);
+		state.files[fileKey()] = next;
+		// Keep the 50 most recent files
+		const keys = Object.keys(state.files);
+		if (keys.length > 50)
+			delete state.files[keys[0]];
+		settings.write("files", state.files);
+	}
+
+	// The APA title without its placeholder: what the sidebar and card header show
+	function tidyTitle(apa, fallback) {
+		const line = apa && apa.text ? apa.text.split("\n")[1] || "" : "";
+		const title = line.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+		return title || fallback;
+	}
+
+	// Returns [{ title, items: [{ key, number, title, apa | error | failed, left, check }] }]. Tables are numbered across
+	// the whole file, from the first number set for this file, skipping tables left out of the report.
 	function build(file, firstNumber) {
-		let number = (firstNumber || 1) - 1;
-		return file.analyses.map(function (analysis) {
-			const models = tableModels(analysis);
-			const plain = models.map(plainTable);
-			const items = models.map(function (model, i) {
-				number++;
-				const item = { number: number, title: _apaPlain(model.get("title") || ""), model: model, plain: plain[i] };
+		const prefs = fileSettings();
+		let number = (firstNumber || prefs.start) - 1;
+		const seen = {};
+		return file.analyses.map(function (analysis, a) {
+			const tables = analysis.tables || [];
+			const entries = tables.map(function (t, i) { return { t: t, i: i }; }).filter(function (e) { return e.t; });
+			const models = entries.map(function (e) { return usable(e.t) ? new JASPWidgets.table(e.t) : null; });
+			const plain = models.map(function (m) { return m ? plainTable(m) : null; });
+			const items = entries.map(function (entry, j) {
+				const key = "a" + a + "-t" + entry.i;
+				const rawTitle = _apaPlain(entry.t.title || "");
+				const item = { key: key, number: null, title: rawTitle || "Untitled table", rawTitle: rawTitle };
+				const model = models[j];
+				if (!model) {
+					// JASP shows these, but there is nothing to turn into an APA table
+					const message = entry.t.error && entry.t.error.errorMessage ? _apaPlain(entry.t.error.errorMessage) : "";
+					item.failed = entry.t.status === "error"
+						? "JASP couldn't compute this table" + (message ? ": " + message : ".")
+						: "This table is empty in JASP, so there is nothing to copy.";
+					return item;
+				}
+				item.check = checkTitles.test(rawTitle);
+				item.left = prefs.out.indexOf(key) !== -1 || (item.check && prefs.in.indexOf(key) === -1);
+				if (!item.left)
+					item.number = ++number;
+				item.model = model;
+				item.plain = plain[j];
 				try {
 					item.apa = buildAPATable(apaRenderTable(model), {
 						title: model.get("title"),
 						subtitle: model.get("subtitle"),
 						footnotes: model.get("footnotes"),
-						otherTables: plain.map(function (table, j) { return { table: table, title: models[j].get("title") }; })
-							.filter(function (_, j) { return j !== i; }),
+						otherTables: plain.map(function (table, k) { return table && k !== j ? { table: table, title: models[k].get("title") } : null; })
+							.filter(Boolean),
 						dataSampleSize: analysis.sampleSize,  // counted from the saved data, used when the tables don't say
 						variableNames: analysis.variables,    // lets the first column be headed "Variable" when it lists them
-						shownTable: plain[i]                  // the table as JASP shows it, so the change list includes decimals
-					}, number);
+						shownTable: plain[j]                  // the table as JASP shows it, so the change list includes decimals
+					}, item.number || "");
+					item.title = tidyTitle(item.apa, item.title);
 				} catch (e) {
 					item.error = String(e && e.message || e);
 				}
 				return item;
 			});
-			return { title: analysis.title || analysis.name || "Analysis", name: analysis.name, sampleSize: analysis.sampleSize, items: items };
-		}).filter(function (group) { return group.items.length > 0; });
+			// Analyses with the same name get a number ("ANOVA (2)") so the list can tell them apart
+			let title = analysis.title || analysis.name || "Analysis";
+			seen[title] = (seen[title] || 0) + 1;
+			if (seen[title] > 1)
+				title += " (" + seen[title] + ")";
+			return { title: title, name: analysis.name, sampleSize: analysis.sampleSize, variables: analysis.variables || [], items: items, plotsOnly: items.length === 0 };
+		});
 	}
 
 	// ---- Small helpers ----
@@ -143,6 +193,7 @@
 		for (const button of document.querySelectorAll("[data-theme-choice]"))
 			button.setAttribute("aria-checked", String(button.dataset.themeChoice === state.theme));
 		applyIcon();
+		rove();
 	}
 	// The icon follows the theme (light: blue, dark: dark grey, pink: pink) unless one is chosen in the menu
 	function applyIcon() {
@@ -150,6 +201,7 @@
 		const variant = state.appIcon !== "theme" ? state.appIcon : theme === "dark" ? "dark" : theme === "pink" ? "pink" : "blue";
 		for (const button of document.querySelectorAll("[data-icon-choice]"))
 			button.setAttribute("aria-checked", String(button.dataset.iconChoice === state.appIcon));
+		rove();
 		if (variant === state.shownIcon)
 			return;
 		state.shownIcon = variant;
@@ -175,6 +227,7 @@
 		state.file = file;
 		state.name = name || "";
 		state.copied.clear();
+		$id("startNumber").value = String(fileSettings().start);
 		const groups = render();
 		$id("empty").hidden = true;
 		$id("layout").hidden = false;
@@ -197,50 +250,59 @@
 		const keep = state.current;
 		const keepTop = keep && $id(keep) ? $id(keep).getBoundingClientRect().top : null;
 
-		const groups = build(state.file, state.start);
+		// The open "What changed" panels stay open across reloads
+		const openPanels = new Set();
+		for (const group of state.groups || [])
+			for (const item of group.items)
+				if (item.changesPanel && !item.changesPanel.hidden)
+					openPanels.add(item.key);
+
+		const all = build(state.file);
+		const groups = all.filter(function (g) { return !g.plotsOnly; });
 		state.groups = groups;
 		shownCurrent = null;
 		const side = $id("side");
 		side.textContent = "";
 		tables.textContent = "";
 
-		let count = 0, ready = 0;
 		for (const group of groups) {
-			const list = el("details", { open: "" }, [el("summary", {}, [el("span", { text: group.title }), el("span", { class: "count", text: String(group.items.length) })])]);
+			const list = el("details", { open: "" }, [el("summary", { title: group.title }, [el("span", { class: "g", text: group.title }), el("span", { class: "count", text: String(group.items.length) })])]);
 			side.appendChild(list);
 			tables.appendChild(el("h2", { class: "analysis-title", text: group.title }));
 			for (const item of group.items) {
-				count++;
-				const id = "table-" + item.number;
-				const todo = item.apa ? item.apa.todo : [];
-				const isReady = !item.error && todo.length === 0;
-				if (isReady)
-					ready++;
+				const id = "table-" + item.key;
 				item.id = id;
-				item.ready = isReady;
-				const link = el("a", { href: "#" + id, "data-id": id }, [
-					el("span", { class: "n", text: String(item.number) }),
+				const link = el("a", { href: "#" + id, "data-id": id, title: item.title }, [
+					el("span", { class: "n", text: item.number ? String(item.number) : "–" }),
 					el("span", { class: "t", text: item.title }),
-					el("span", { class: "state" + (item.error ? " error" : isReady ? " ready" : ""), title: item.error ? "Couldn't convert" : isReady ? "Ready to paste" : plural(todo.length, "thing", "things") + " to add" })
+					el("span", { class: "mark" })
 				]);
 				link.addEventListener("click", function (e) {
 					e.preventDefault();
 					goTo(id);
+					if (isNarrow())
+						setDrawer(false);
 				});
 				item.link = link;
 				list.appendChild(link);
 				item.card = card(item, id);
 				tables.appendChild(item.card);
+				if (openPanels.has(item.key))
+					toggleChanges(item, true);
+				updateMark(item);
 			}
 		}
+		const count = countable().length;
+		$id("progress").hidden = count === 0;
 		if (count === 0) {
-			tables.appendChild(el("p", { class: "no-match", text: "This file has no results tables. Run your analyses in JASP, save, and open the file again." }));
+			const plotsOnly = all.filter(function (g) { return g.plotsOnly; }).length;
+			tables.appendChild(el("p", { class: "no-match", text: all.length === 0
+				? "This file has no analyses yet. Run them in JASP, save, and open the file again."
+				: plotsOnly === all.length
+					? "This file has " + plural(all.length, "analysis", "analyses") + ", but " + (all.length === 1 ? "it only makes" : "they only make") + " plots. jAPAsp turns results tables into APA tables."
+					: "None of this file's tables has anything to copy." }));
 		}
-
-		// Ready count and ring
-		$id("readyCount").textContent = ready + " of " + count;
-		const circumference = 113.1;
-		$id("ringDone").style.strokeDashoffset = String(count === 0 ? circumference : circumference * (1 - ready / count));
+		updateProgress();
 
 		applyFilter();
 		watchCurrent();
@@ -254,26 +316,97 @@
 		return groups;
 	}
 
+	// Tables that go in the report: converted and not left out
+	function countable() {
+		const out = [];
+		for (const group of state.groups)
+			for (const item of group.items)
+				if (item.apa && !item.left)
+					out.push(item);
+		return out;
+	}
+
+	// The ring counts copies: the yellow parts can only be finished in the document, so "copied" is what the app can know
+	function updateProgress() {
+		const items = countable();
+		const copied = items.filter(function (i) { return state.copied.has(i.key); }).length;
+		$id("readyCount").textContent = copied + " of " + items.length;
+		$id("readyLabel").textContent = items.length === 1 ? "table copied" : "tables copied";
+		$id("readyHint").hidden = !items.some(function (i) { return i.apa.todo.length > 0; });
+		const circumference = 113.1;
+		$id("ringDone").style.strokeDashoffset = String(items.length === 0 ? circumference : circumference * (1 - copied / items.length));
+	}
+
+	// The mark after a table's name: a tick once copied, otherwise a dot (yellow: parts to finish, green: nothing to add)
+	function updateMark(item) {
+		const mark = item.link.querySelector(".mark");
+		mark.textContent = "";
+		const todo = item.apa ? item.apa.todo.length : 0;
+		let kind, label;
+		if (item.failed || item.error) { kind = "error"; label = item.failed || "Couldn't convert"; }
+		else if (item.left) { kind = "left"; label = "Left out of your report"; }
+		else if (state.copied.has(item.key)) { kind = "copied"; label = todo > 0 ? "Copied. Finish the " + yellowParts(todo) + " in your document" : "Copied"; }
+		else if (todo > 0) { kind = "todo"; label = plural(todo, "yellow part", "yellow parts") + " to finish after pasting"; }
+		else { kind = "ready"; label = "Nothing to add: ready to paste"; }
+		mark.className = "mark " + kind;
+		mark.title = label;
+		if (kind === "copied")
+			mark.appendChild(tick());
+		mark.appendChild(el("span", { class: "sr", text: label }));
+		item.link.classList.toggle("left", kind === "left" || kind === "error");
+	}
+
+	function yellowParts(n) { return n === 1 ? "yellow part" : n + " yellow parts"; }
+
+	// Leaves a table out of the report (no number, not in Copy all) or puts it back
+	function setLeftOut(item, left) {
+		const prefs = fileSettings();
+		const out = prefs.out.filter(function (k) { return k !== item.key; });
+		const back = prefs.in.filter(function (k) { return k !== item.key; });
+		if (left && !item.check)
+			out.push(item.key);
+		if (!left && item.check)
+			back.push(item.key);
+		saveFileSettings({ out: out, in: back });
+		state.current = item.id;
+		render();
+		const now = itemById(item.id);
+		toast(left ? "Left out of your report. The tables after it are renumbered." : "Back in your report as Table " + (now ? now.number : "") + ".");
+	}
+
 	function card(item, id) {
+		const numberText = item.number ? "Table " + item.number : item.failed || item.error ? "Not converted" : "Not in report";
 		const head = el("header", { class: "card-head" }, [
-			el("div", { class: "label" }, [el("span", { class: "num", text: "Table " + item.number }), el("span", { class: "t", text: item.title, title: item.title })])
+			el("div", { class: "label" }, [el("span", { class: "num", text: numberText }), el("span", { class: "t", text: item.title, title: item.title })])
 		]);
-		const node = el("article", { class: "card glass", id: id, "aria-label": "Table " + item.number + ", " + item.title }, [head]);
-		if (item.error) {
-			node.appendChild(el("div", { class: "error", text: "This table couldn't be converted: " + item.error }));
+		const node = el("article", { class: "card glass" + (item.left ? " left-out" : ""), id: id, "aria-label": numberText + ", " + item.title }, [head]);
+		if (item.failed || item.error) {
+			node.appendChild(el("div", { class: "error", text: item.failed || "This table couldn't be converted: " + item.error }));
+			return node;
+		}
+
+		const leaveButton = el("button", { type: "button", class: "btn quiet", title: item.left ? "Give it a table number and include it in Copy all" : "No table number and not in Copy all; the tables after it are renumbered", text: item.left ? "Put in report" : "Leave out" });
+		leaveButton.addEventListener("click", function () { setLeftOut(item, !item.left); });
+		node.addEventListener("pointerdown", function () { setCurrent(id); });
+
+		if (item.left) {
+			head.appendChild(el("div", { class: "actions" }, [leaveButton]));
+			node.appendChild(el("p", { class: "left-note", text: item.check
+				? "A check of the test's assumptions. Most reports leave it out, so it has no table number. Ask your tutor if you're unsure."
+				: "Left out of your report: it has no table number and isn't in Copy all." }));
 			return node;
 		}
 
 		const changesButton = el("button", { type: "button", class: "btn", title: "Show what was changed to match APA 7 (W)", "aria-expanded": "false", "aria-controls": id + "-changes", text: "What changed" });
 		const textButton = el("button", { type: "button", class: "btn", title: "Copy as plain text, with tabs between columns (T)", text: "Copy text" });
 		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs (C)" }, [el("span", { class: "swap", text: "Copy APA table" })]);
-		head.appendChild(el("div", { class: "actions" }, [changesButton, textButton, button]));
+		head.appendChild(el("div", { class: "actions" }, [leaveButton, changesButton, textButton, button]));
 
 		const paper = el("div", { class: "paper" });
 		paper.innerHTML = item.apa.html;
 		node.appendChild(el("div", { class: "tray" }, [paper]));
 
-		const changes = el("section", { class: "changes", id: id + "-changes", "aria-label": "What changed in table " + item.number });
+		const changes = el("section", { class: "changes", id: id + "-changes", "aria-label": "What changed in " + numberText });
 		changes.hidden = true;
 		node.appendChild(changes);
 		changesButton.addEventListener("click", function () { toggleChanges(item); });
@@ -282,22 +415,92 @@
 
 		const todo = item.apa.todo;
 		if (todo.length > 0) {
-			const chips = el("div", { class: "todo" }, [el("span", { class: "lead", text: "Still to add:" })]);
+			const chips = el("div", { class: "todo" }, [el("span", { class: "lead", text: "Finish after pasting:" })]);
+			const hint = el("div", { class: "todo-hint", role: "status" });
+			hint.hidden = true;
 			for (const thing of todo) {
-				const chip = el("button", { type: "button", title: "Show where", text: thing.charAt(0).toUpperCase() + thing.slice(1) });
-				chip.addEventListener("click", function () { showHighlight(item); });
+				const kind = todoKind(thing);
+				const chip = el("button", { type: "button", title: "How to do this, and where", "aria-expanded": "false", text: thing.charAt(0).toUpperCase() + thing.slice(1) });
+				chip.addEventListener("click", function () {
+					const open = chip.getAttribute("aria-expanded") !== "true";
+					for (const other of chips.querySelectorAll("button"))
+						other.setAttribute("aria-expanded", "false");
+					chip.setAttribute("aria-expanded", String(open));
+					hint.hidden = !open;
+					if (open) {
+						hint.textContent = "";
+						for (const part of todoHelp(kind, thing, item))
+							hint.appendChild(part);
+						showHighlight(item, kind);
+					}
+				});
 				chips.appendChild(chip);
 			}
 			node.appendChild(chips);
+			node.appendChild(hint);
 		}
 		else
 			node.appendChild(el("div", { class: "todo ready", text: "Nothing to add. Ready to paste." }));
 
+		const notes = tableNotes(item);
+		if (notes.length > 0)
+			node.appendChild(el("ul", { class: "info" }, notes.map(function (n) { return el("li", { text: n }); })));
+
 		button.addEventListener("click", function () { copyItem(item, false); });
 		textButton.addEventListener("click", function () { copyItem(item, true); });
-		node.addEventListener("pointerdown", function () { setCurrent(id); });
 		item.button = button;
 		return node;
+	}
+
+	// What each to-do is about, from the builder's wording
+	function todoKind(text) {
+		if (/title/.test(text)) return "title";
+		if (/names/.test(text)) return "names";
+		if (/heading/.test(text)) return "heading";
+		if (/sample size/.test(text)) return "sample";
+		if (/landscape/.test(text)) return "landscape";
+		return "other";
+	}
+
+	// Help for a to-do, with an example from the table itself where possible
+	function todoHelp(kind, text, item) {
+		const parts = [];
+		const p = function (html) { const node = el("p"); node.innerHTML = html; parts.push(node); };
+		const esc = function (t) { return _apaEscape(String(t)); };
+		const group = state.groups.find(function (g) { return g.items.indexOf(item) !== -1; });
+		const vars = (group && group.variables || []).slice(0, 3).map(function (v) { return apaSentenceCase(String(v).replace(/[_.]+/g, " "), true); });
+		const list = vars.length > 1 ? vars.slice(0, -1).join(", ") + " and " + vars[vars.length - 1] : vars[0] || "";
+		if (kind === "title")
+			p("Write a short title that says what the table shows, in Title Case. For example: <i>" + esc(apaTitleCase(item.title + (list ? " for " + list : ""))) + (list ? "" : " of …") + "</i>. Replace the yellow text with it after pasting.");
+		else if (kind === "names") {
+			const word = (text.split(":")[1] || "").split(",")[0].trim();
+			p("Replace " + (word ? "<i>" + esc(word) + "</i>" : "each short name") + " with what it measures (for example, <i>Reading score</i>), or keep it and explain it in the note: <i>" + esc(word || "drp") + " = …</i>");
+		}
+		else if (kind === "heading")
+			p("Give the column a short heading that says what it holds, for example <i>Group</i>, <i>Condition</i> or <i>Measure</i>.");
+		else if (kind === "sample")
+			p("Write how many participants the table is based on, for example <i>N</i> = 120. If it differs between rows, give each one.");
+		else if (kind === "landscape")
+			p("Turn the page with this table sideways. Word: put a section break before and after the table, then Layout › Orientation › Landscape. Google Docs: select the table, then File › Page setup › Apply to: Selected content › Landscape.");
+		p("Then remove the yellow: in Word, Home › Text Highlight Colour › No Colour; in Google Docs, the highlighter › None.");
+		parts[parts.length - 1].className = "after";
+		return parts;
+	}
+
+	// Neutral notes on a table: smaller type, and extras some courses don't use (not advice on what to report)
+	function tableNotes(item) {
+		const notes = [];
+		const size = /<table style="[^"]*font-size: (\d+)pt/.exec(item.apa.html);
+		if (size && +size[1] < 12)
+			notes.push("Smaller type (" + size[1] + " pt) so the table fits the width of the page. APA allows smaller type in tables.");
+		const extras = [];
+		if (/VS-MPR/.test(item.apa.text))
+			extras.push("VS-MPR");
+		if (/(^|\t)Student(\t|$)/m.test(item.apa.text) && /(^|\t)Welch(\t|$)/m.test(item.apa.text))
+			extras.push("both Student and Welch rows");
+		if (extras.length > 0)
+			notes.push("This table has extras some courses don't use: " + extras.join(", ") + ". To drop them, untick them in JASP and save; this table updates by itself.");
+		return notes;
 	}
 
 	// The change list: every rule that changed something, with each distinct change as before -> after
@@ -315,7 +518,10 @@
 
 	function fillChanges(panel, changes) {
 		const cells = changes.reduce(function (n, c) { return n + c.cells; }, 0);
-		panel.appendChild(el("p", { class: "lead", text: plural(changes.length, "change", "changes") + " to match APA 7" + (cells > 0 ? ", " + plural(cells, "cell", "cells") + " rewritten." : ".") + " Before is the table as JASP shows it." }));
+		panel.appendChild(el("p", { class: "lead" }, [
+			el("strong", { text: "Your results are the same as in JASP." }),
+			" Only rounding, symbols, wording and layout changed to match APA 7 (" + plural(changes.length, "change", "changes") + (cells > 0 ? ", " + plural(cells, "cell", "cells") : "") + "). Each change shows the table as JASP shows it \u2192 the APA version."
+		]));
 		const fragment = function (html, empty) {
 			const span = el("span", { class: "v" + (html === "" ? " none" : "") });
 			if (html === "")
@@ -371,14 +577,26 @@
 		panel.appendChild(list);
 	}
 
-	// Each click on a to-do chip moves to the next highlighted spot in that table
-	function showHighlight(item) {
+	// Which to-do a highlighted spot belongs to, from where it sits in the table
+	function spotKind(spot) {
+		if (/Too wide/.test(spot.textContent)) return "landscape";
+		if (spot.closest("table"))
+			return /Add heading/i.test(spot.textContent) ? "heading" : "names";
+		const para = spot.closest("p");
+		const paras = para ? Array.from(para.parentNode.children).filter(function (n) { return n.tagName === "P"; }) : [];
+		return para && paras[paras.length - 1] === para && paras.indexOf(para) > 1 ? "sample" : "title";
+	}
+
+	// Moves to the next highlighted spot of one kind (or any kind) in a table
+	function showHighlight(item, kind) {
 		if (!state.highlights)
 			setHighlights(true);
-		const spots = item.card.querySelectorAll(".paper [style*=\"#ffff00\"]");
+		const spots = Array.from(item.card.querySelectorAll(".paper [style*=\"#ffff00\"]"))
+			.filter(function (s) { return !kind || spotKind(s) === kind; });
 		if (spots.length === 0)
 			return;
-		item.spot = ((item.spot === undefined ? -1 : item.spot) + 1) % spots.length;
+		item.spot = item.spotKind === kind ? ((item.spot === undefined ? -1 : item.spot) + 1) % spots.length : 0;
+		item.spotKind = kind;
 		const spot = spots[item.spot];
 		const box = $id("tables");
 		scrollTablesTo(box.scrollTop + spot.getBoundingClientRect().top - box.getBoundingClientRect().top - box.clientHeight / 2);
@@ -392,14 +610,20 @@
 
 	// ---- Search and filter ----
 
+	const filterNames = { all: "All", todo: "To copy", done: "Copied" };
+
 	function applyFilter() {
 		const query = state.query.trim().toLowerCase();
+		const numberQuery = /^(table\s*)?(\d+)$/.exec(query);  // "table 1" or "1" means Table 1, not 10 and 11
 		let shown = 0;
 		for (const group of state.groups) {
 			let groupShown = 0;
 			for (const item of group.items) {
-				const matches = (state.filter === "all" || (state.filter === "ready") === item.ready) &&
-					(!query || (item.title + " " + group.title + " table " + item.number).toLowerCase().indexOf(query) !== -1);
+				const copied = state.copied.has(item.key);
+				const inFilter = state.filter === "all" || (item.apa && !item.left && (state.filter === "done") === copied);
+				const inQuery = !query || (numberQuery ? item.number === +numberQuery[2]
+					: (item.title + " " + item.rawTitle + " " + group.title).toLowerCase().indexOf(query) !== -1);
+				const matches = inFilter && inQuery;
 				item.card.hidden = !matches;
 				item.link.hidden = !matches;
 				if (matches)
@@ -413,18 +637,50 @@
 				heading.hidden = groupShown === 0;
 		}
 		let none = $id("noMatch");
+		let sideNone = $id("sideNone");
 		if (shown === 0 && state.groups.length > 0) {
 			if (!none) {
-				none = el("p", { class: "no-match", id: "noMatch" });
+				none = el("div", { class: "no-match", id: "noMatch" });
 				$id("tables").appendChild(none);
 			}
-			none.textContent = query ? "No table matches “" + state.query.trim() + "”." : state.filter === "todo" ? "Every table is ready to paste." : "No table is ready yet. Check the highlights in each one.";
+			none.textContent = "";
+			const where = state.filter !== "all" ? " in " + filterNames[state.filter] : "";
+			none.appendChild(el("p", { text: query ? "No table matches \u201c" + state.query.trim() + "\u201d" + where + "."
+				: state.filter === "todo" ? "Every table is copied." : "No table copied yet. Copy one with its Copy APA table button." }));
+			const buttons = [];
+			if (query) {
+				const clear = el("button", { type: "button", class: "btn", text: "Clear search" });
+				clear.addEventListener("click", clearSearch);
+				buttons.push(clear);
+			}
+			if (state.filter !== "all") {
+				const all = el("button", { type: "button", class: "btn", text: "Show all tables" });
+				all.addEventListener("click", function () { state.filter = "all"; applyFilter(); });
+				buttons.push(all);
+			}
+			if (buttons.length)
+				none.appendChild(el("div", { class: "no-match-actions" }, buttons));
+			if (!sideNone) {
+				sideNone = el("p", { class: "none", id: "sideNone" });
+				$id("side").appendChild(sideNone);
+			}
+			sideNone.textContent = query ? "No table matches." : "No tables here.";
 		}
-		else if (none)
-			none.remove();
+		else {
+			if (none) none.remove();
+			if (sideNone) sideNone.remove();
+		}
 		for (const button of document.querySelectorAll("[data-filter]"))
 			button.setAttribute("aria-checked", String(button.dataset.filter === state.filter));
+		$id("searchClear").hidden = !state.query;
+		rove();
 		updateMenu();
+	}
+
+	function clearSearch() {
+		search.value = "";
+		state.query = "";
+		applyFilter();
 	}
 
 	function visibleItems() {
@@ -571,12 +827,9 @@
 	}
 
 	function markCopied(item) {
-		state.copied.add(item.number);
-		if (!item.link.querySelector(".copied")) {
-			const mark = tick();
-			mark.setAttribute("class", "copied");
-			item.link.insertBefore(mark, item.link.lastChild);
-		}
+		state.copied.add(item.key);
+		updateMark(item);
+		updateProgress();
 	}
 
 	// Blurs the button's label out, swaps it, and blurs the new one in
@@ -607,14 +860,15 @@
 				}, 2200);
 			}
 			const left = item.apa.todo.length;
-			toast("Table " + item.number + " copied" + (asText ? " as plain text" : "") + "." + (left > 0 ? " Fill in the " + plural(left, "highlight", "highlights") + " after pasting." : ""));
+			const name = item.number ? "Table " + item.number : "The table";
+			toast(name + " copied" + (asText ? " as plain text" : "") + ". " + (left > 0 ? "Paste it into your document, then finish the " + yellowParts(left) + "." : "Paste it into your document."));
 		}, function (e) {
 			toast("Couldn't copy: " + (e && e.message || e), true);
 		});
 	}
 
 	function copyAll(asText) {
-		const items = visibleItems().filter(function (i) { return i.apa; });
+		const items = visibleItems().filter(function (i) { return i.apa && !i.left; });
 		if (items.length === 0)
 			return;
 		const html = items.map(function (i) { return i.apa.html; }).join("<p>&nbsp;</p>");
@@ -622,7 +876,7 @@
 		copyRaw(asText ? null : apaClipboardHTML(html), text).then(function () {
 			items.forEach(markCopied);
 			const left = items.reduce(function (n, i) { return n + i.apa.todo.length; }, 0);
-			toast(plural(items.length, "table", "tables") + " copied" + (asText ? " as plain text" : "") + "." + (left > 0 ? " " + plural(left, "highlight", "highlights") + " to fill in." : ""));
+			toast(plural(items.length, "table", "tables") + " copied" + (asText ? " as plain text" : "") + ". " + (left > 0 ? "Paste them, then finish the " + yellowParts(left) + "." : "Paste them into your document."));
 		}, function (e) {
 			toast("Couldn't copy: " + (e && e.message || e), true);
 		});
@@ -669,12 +923,48 @@
 			openLink(links.profile);
 	});
 
+	// Narrow windows show the table list as a drawer over the tables, opened with the same button and B
+	const narrowQuery = window.matchMedia("(max-width: 760px)");
+	function isNarrow() { return narrowQuery.matches; }
+	function setDrawer(open) {
+		// The drawer starts under the title bar, which can wrap onto two rows in a narrow window
+		if (open)
+			root.style.setProperty("--drawer-top", Math.round(document.querySelector(".titlebar").getBoundingClientRect().bottom + 10) + "px");
+		$id("layout").classList.toggle("drawer-open", open);
+		if (isNarrow()) {
+			$id("sidePanel").inert = !open;
+			$id("sideButton").setAttribute("aria-expanded", String(open));
+		}
+		else
+			$id("sidePanel").inert = !state.sidebar;
+	}
+	document.addEventListener("pointerdown", function (e) {
+		if (isNarrow() && $id("layout").classList.contains("drawer-open") && !e.target.closest("#sidePanel, #sideButton"))
+			setDrawer(false);
+	});
+	function toggleSidebar() {
+		if (isNarrow())
+			setDrawer(!$id("layout").classList.contains("drawer-open"));
+		else
+			setSidebar(!state.sidebar);
+	}
+
+	// One tab stop per radio group: the chosen option (arrow keys move within the group)
+	function rove() {
+		for (const group of document.querySelectorAll("[role=radiogroup]")) {
+			const radios = Array.from(group.querySelectorAll("[role=radio]"));
+			const chosen = radios.find(function (r) { return r.getAttribute("aria-checked") === "true"; }) || radios[0];
+			for (const r of radios)
+				r.tabIndex = r === chosen ? 0 : -1;
+		}
+	}
+
 	// The table list on the left: shown, or folded away so the tables get the whole width
 	function setSidebar(on) {
 		state.sidebar = on;
 		settings.write("sidebar", on);
 		$id("layout").classList.toggle("side-hidden", !on);
-		$id("sidePanel").inert = !on;
+		$id("sidePanel").inert = isNarrow() ? !$id("layout").classList.contains("drawer-open") : !on;
 		const button = $id("sideButton");
 		const label = on ? "Hide the table list" : "Show the table list";
 		button.setAttribute("aria-expanded", String(on));
@@ -697,7 +987,10 @@
 		const live = !!(state.autoReload && state.path);
 		const sync = $id("reloadButton");
 		sync.classList.toggle("live", live);
-		sync.title = live ? "Watching for saves in JASP: the tables update by themselves. Click to reload now (Ctrl+R)." : "Reload the file (Ctrl+R)";
+		sync.title = live ? "Watching for saves in JASP: the tables update by themselves. Click to reload now (Ctrl+R)."
+			: state.path ? "Not watching for saves. Turn it on in ⋯ › Reload when JASP saves. Click to reload now (Ctrl+R)."
+			: "Reload the file (Ctrl+R)";
+		sync.setAttribute("aria-label", live ? "Reload the file (watching for saves)" : "Reload the file");
 	}
 
 	// ---- Opening files ----
@@ -740,11 +1033,13 @@
 			remember(path);
 			return tauri.core.invoke("file_stamp", { path: path }).then(function (stamp) { state.stamp = stamp; });
 		}, function (e) {
-			if (!quiet && state.recent.indexOf(path) !== -1 && !state.file) {
+			if (quiet)
+				throw e;  // reloads decide what to say, and must not report success
+			if (state.recent.indexOf(path) !== -1 && !state.file) {
 				forget(path);
 				toast("Couldn't open " + baseName(path) + ": " + (e && e.message || e) + ". It's off your recent files.", true);
 			}
-			else if (!quiet)
+			else
 				toast("Couldn't open " + baseName(path) + ": " + (e && e.message || e), true);
 		});
 	}
@@ -759,21 +1054,35 @@
 
 	function reload() {
 		if (tauri && state.path)
-			openPath(state.path, true).then(function () { spinSync(); toast("Reloaded " + state.name + "."); });
+			openPath(state.path, true).then(function () { spinSync(); toast("Reloaded " + state.name + "."); }, function (e) {
+				toast("Couldn't reload " + state.name + ": " + (e && e.message || e) + ". The tables shown are from before.", true);
+			});
 		else if (state.file)
 			toast("Reloading works in the app, where the file's location is known.");
 	}
 
+	let reloading = false, reloadFailures = 0;
 	// Checks every 2 seconds whether JASP saved the file again
 	setInterval(function () {
 		if (!tauri || !state.path || !state.autoReload || document.hidden)
 			return;
+		if (reloading)
+			return;
 		tauri.core.invoke("file_stamp", { path: state.path }).then(function (stamp) {
 			if (stamp && state.stamp && stamp !== state.stamp) {
-				state.stamp = stamp;
-				// JASP writes the file in steps: wait a moment so the reload reads the finished file
+				// JASP writes the file in steps: wait a moment so the reload reads the finished file. The stamp only
+				// moves on after a good read (openPath sets it), so a failed read is tried again at the next check.
+				reloading = true;
 				setTimeout(function () {
-					openPath(state.path, true).then(function () { spinSync(); toast("JASP saved " + state.name + ". Tables updated."); });
+					openPath(state.path, true).then(function () {
+						reloadFailures = 0;
+						spinSync();
+						toast("JASP saved " + state.name + ". Tables updated.");
+					}, function (e) {
+						reloadFailures++;
+						if (reloadFailures === 3)
+							toast("Couldn't read " + state.name + " after JASP saved it: " + (e && e.message || e) + ". The tables shown are from before. Still trying.", true);
+					}).then(function () { reloading = false; });
 				}, 600);
 			}
 		}, function () {});
@@ -833,8 +1142,7 @@
 	$id("startNumber").addEventListener("change", function () {
 		const n = Math.max(1, Math.min(999, parseInt(this.value, 10) || 1));
 		this.value = String(n);
-		state.start = n;
-		settings.write("start", n);
+		saveFileSettings({ start: n });  // each file keeps its own first number
 		if (state.file) {
 			state.current = null;
 			render();
@@ -891,7 +1199,8 @@
 
 		if (key === "Escape") {
 			if (!menu.hidden) { toggleMenu(false); menuButton.focus(); return; }
-			if (state.query) { search.value = ""; state.query = ""; applyFilter(); search.blur(); return; }
+			if (isNarrow() && $id("layout").classList.contains("drawer-open")) { setDrawer(false); return; }
+			if (state.query) { clearSearch(); search.blur(); return; }
 			if (typing) e.target.blur();
 			return;
 		}
@@ -901,16 +1210,16 @@
 		if (mod && (key === "=" || key === "+")) { e.preventDefault(); setZoom(state.zoom + 0.1); return; }
 		if (mod && (key === "-" || key === "_")) { e.preventDefault(); setZoom(state.zoom - 0.1); return; }
 		if (mod && key === "0") { e.preventDefault(); setZoom(1); return; }
-		if (typing || mod || e.altKey || !state.file)
+		if (typing || mod || e.altKey || !state.file || $id("keys").open)
 			return;
 		if (key === "/") { e.preventDefault(); search.focus(); }
 		else if (key === "j" || key === "J") step(1);
 		else if (key === "k" || key === "K") step(-1);
 		else if (key === "C" && e.shiftKey) copyAll(false);
-		else if (key === "c") copyItem(currentItem(), false);
+		else if (key === "c" || key === "C") copyItem(currentItem(), false);  // C without Shift is Caps Lock
 		else if (key === "t" || key === "T") copyItem(currentItem(), true);
 		else if (key === "w" || key === "W") toggleChanges(currentItem());
-		else if (key === "b" || key === "B") setSidebar(!state.sidebar);
+		else if (key === "b" || key === "B") toggleSidebar();
 		else if (key === "h" || key === "H") { setHighlights(!state.highlights); toast(state.highlights ? "Highlights shown in the preview." : "Highlights hidden in the preview. Copies still have them."); }
 		else if (key === "?") $id("keys").showModal();
 	});
@@ -947,10 +1256,25 @@
 	setZoom(state.zoom);
 	setHighlights(state.highlights);
 	setSidebar(state.sidebar);
-	$id("sideButton").addEventListener("click", function () { setSidebar(!state.sidebar); });
+	$id("sideButton").addEventListener("click", toggleSidebar);
+	$id("searchClear").addEventListener("click", function () { clearSearch(); search.focus(); });
+	if (narrowQuery.addEventListener)
+		narrowQuery.addEventListener("change", function () { setDrawer(false); });
+	document.addEventListener("keydown", function (e) {
+		// Arrow keys move between the choices of a radio group (themes, filters, app icon)
+		const radio = e.target.closest && e.target.closest("[role=radio]");
+		if (!radio || !/^Arrow(Left|Right|Up|Down)$/.test(e.key))
+			return;
+		const group = Array.from(radio.closest("[role=radiogroup]").querySelectorAll("[role=radio]"));
+		const next = group[(group.indexOf(radio) + (/Left|Up/.test(e.key) ? -1 : 1) + group.length) % group.length];
+		e.preventDefault();
+		e.stopPropagation();
+		next.click();
+		next.focus();
+	}, true);
 	$id("autoReload").checked = state.autoReload;
 	$id("reduceEffects").checked = state.reduced;
-	$id("startNumber").value = String(state.start);
+	$id("startNumber").value = String(fileSettings().start);
 	drawRecent();
 	updateMenu();
 	requestAnimationFrame(function () { requestAnimationFrame(function () { root.classList.add("started"); }); });

@@ -26,6 +26,7 @@
 	<label class="search" id="searchWrap" hidden>
 		<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
 		<input id="search" type="search" placeholder="Find a table" aria-label="Find a table" autocomplete="off" spellcheck="false">
+		<button class="search-clear" id="searchClear" type="button" aria-label="Clear the search" title="Clear the search (Esc)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6l8 8M14 6l-8 8" /></svg></button>
 		<kbd>Ctrl F</kbd>
 	</label>
 
@@ -39,13 +40,13 @@
 	</div>
 
 	<button class="btn primary" id="openButton" type="button">Open JASP file</button>
-	<button class="icon-btn" id="menuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-label="More options" title="More options">
+	<button class="icon-btn" id="menuButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="More options" title="More options">
 		<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4.5" cy="10" r="1.3" /><circle cx="10" cy="10" r="1.3" /><circle cx="15.5" cy="10" r="1.3" /></svg>
 	</button>
 
-	<div class="menu glass" id="menu" role="menu" hidden>
-		<button type="button" role="menuitem" data-action="copy-all" class="needs-file">Copy all tables shown<kbd>Shift C</kbd></button>
-		<button type="button" role="menuitem" data-action="copy-all-text" class="needs-file">Copy all as plain text</button>
+	<div class="menu glass" id="menu" role="dialog" aria-label="More options" hidden>
+		<button type="button" data-action="copy-all" class="needs-file">Copy all tables shown<kbd>Shift C</kbd></button>
+		<button type="button" data-action="copy-all-text" class="needs-file">Copy all as plain text</button>
 		<hr>
 		<label class="row"><span>Number the first table</span><input id="startNumber" type="number" min="1" max="999" value="1" inputmode="numeric"></label>
 		<label class="row switch"><span>Show highlights in the preview<small>Copies always keep them</small></span><input id="showHighlights" type="checkbox" checked><i></i></label>
@@ -63,10 +64,10 @@
 			<div class="stepper"><button type="button" data-action="zoom-out" aria-label="Smaller">−</button><output id="zoomLabel">100%</output><button type="button" data-action="zoom-in" aria-label="Larger">+</button></div>
 		</div>
 		<hr>
-		<button type="button" role="menuitem" data-action="shortcuts">Keyboard shortcuts<kbd>?</kbd></button>
-		<button type="button" role="menuitem" data-action="feedback" title="Opens a new issue on GitHub, with the app version filled in">Feedback and problems<svg class="out" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5V12" /><path d="M11 4h5v5M16 4l-7 7" /></svg></button>
+		<button type="button" data-action="shortcuts">Keyboard shortcuts<kbd>?</kbd></button>
+		<button type="button" data-action="feedback" title="Opens a new issue on GitHub (needs a free GitHub account), with the app version filled in">Feedback and problems<svg class="out" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5V12" /><path d="M11 4h5v5M16 4l-7 7" /></svg></button>
 		<hr>
-		<button type="button" role="menuitem" data-action="credit" class="credit" title="github.com/onetrickpony1">
+		<button type="button" data-action="credit" class="credit" title="github.com/onetrickpony1">
 			<span class="avatar" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="7.5" r="3" /><path d="M4.5 16a5.5 5.5 0 0 1 11 0" /></svg></span>
 			<span class="who">Created by Matthew Mifsud Bonnici<small>github.com/onetrickpony1</small></span>
 		</button>
@@ -90,18 +91,21 @@
 
 	<div class="layout" id="layout" hidden>
 		<nav class="side glass" id="sidePanel" aria-label="Tables">
-			<div class="summary">
-				<svg class="ring" viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18" /><circle class="done" id="ringDone" cx="22" cy="22" r="18" /></svg>
-				<div><strong id="readyCount">0 of 0</strong><span>tables ready to paste</span></div>
-			</div>
-			<div class="filters" role="radiogroup" aria-label="Show">
-				<button type="button" role="radio" data-filter="all" aria-checked="true">All</button>
-				<button type="button" role="radio" data-filter="todo" aria-checked="false">To do</button>
-				<button type="button" role="radio" data-filter="ready" aria-checked="false">Ready</button>
+			<div id="progress">
+				<div class="summary">
+					<svg class="ring" viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18" /><circle class="done" id="ringDone" cx="22" cy="22" r="18" /></svg>
+					<div><strong id="readyCount">0 of 0</strong><span id="readyLabel">tables copied</span></div>
+				</div>
+				<p class="ready-hint" id="readyHint" hidden>Yellow parts are finished in your document, after pasting.</p>
+				<div class="filters" role="radiogroup" aria-label="Show">
+					<button type="button" role="radio" data-filter="all" aria-checked="true">All</button>
+					<button type="button" role="radio" data-filter="todo" aria-checked="false">To copy</button>
+					<button type="button" role="radio" data-filter="done" aria-checked="false">Copied</button>
+				</div>
 			</div>
 			<div class="side-list" id="side"></div>
 			<footer class="side-foot">
-				<button type="button" data-link="feedback" title="Opens a new issue on GitHub, with the app version filled in"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" /></svg><span>Feedback and problems</span></button>
+				<button type="button" data-link="feedback" title="Opens a new issue on GitHub, with the app version filled in"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" /></svg><span>Feedback and problems<small>Needs a free GitHub account</small></span></button>
 				<button type="button" data-link="credit" title="github.com/onetrickpony1"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7.5" r="3" /><path d="M4.5 16a5.5 5.5 0 0 1 11 0" /></svg><span>Created by Matthew Mifsud Bonnici</span></button>
 			</footer>
 		</nav>
