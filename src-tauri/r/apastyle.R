@@ -52,7 +52,15 @@ apaScales <- function(p) {
 }
 apaGgplot <- function(p, changes) {
   p <- apaText(apaScales(p))
-  p <- p + ggplot2::theme(text = ggplot2::element_text(family = apaFamily))   # also plots built on other themes (theme_bw)
+  # the APA font on every text element: some of JASP's plots set a family of their own on the tick labels.
+  # Elements a plot hides (element_blank) stay hidden.
+  p <- p + ggplot2::theme(text = ggplot2::element_text(family = apaFamily))
+  thf <- tryCatch(ggplot2:::plot_theme(p), error = function(e) NULL)
+  if (!is.null(thf)) for (e in c("axis.text", "axis.text.x", "axis.text.y", "axis.title.x", "axis.title.y", "legend.text", "legend.title", "strip.text", "strip.text.x", "strip.text.y", "plot.title")) {
+    el <- tryCatch(ggplot2::calc_element(e, thf), error = function(x) NULL)
+    if (inherits(el, "element_text") && !identical(el$family, apaFamily))
+      p <- p + do.call(ggplot2::theme, setNames(list(ggplot2::element_text(family = apaFamily)), e))
+  }
   # axis titles a step above the tick labels (11 and 10 pt): JASP's theme takes the step as an argument that
   # defaults to 1, so its titles come out at tick size
   th <- tryCatch(ggplot2:::plot_theme(p), error = function(e) NULL)
@@ -82,6 +90,7 @@ apaGgplot <- function(p, changes) {
     size <- p$layers[[i]]$aes_params$size
     if (is.null(size) && is.null(p$layers[[i]]$mapping$size)) size <- p$layers[[i]]$geom$default_aes$size
     if (is.numeric(size) && length(size) == 1 && size < minSize) p$layers[[i]]$aes_params$size <- minSize
+    if (is.numeric(size) && length(size) == 1 && size > 14 / (2.845 * apaScaleK)) p$layers[[i]]$aes_params$size <- 14 / (2.845 * apaScaleK)
   }
   for (i in seq_along(p$layers)) {           # text drawn in the plot gets the same font as the axes
     if (inherits(p$layers[[i]]$geom, c("GeomText", "GeomLabel")) || grepl("Text", class(p$layers[[i]]$geom)[1])) {
@@ -142,11 +151,31 @@ capText <- function(g, pt) {
   }
   g
 }
+# A single plot whose y axis has no title (JASP's one-sample and paired t test plots): the variable's name, when
+# the plot's own title is one of the data's variables; otherwise left for the figure note to ask about
+nameYAxis <- function(p, plotTitle) {
+  if (!inherits(p, "ggplot") || inherits(p, "patchwork")) return(p)
+  sc <- p$scales$get_scales("y"); has <- function(v) !is.null(v) && !inherits(v, "waiver") && (!is.character(v) || any(nzchar(trimws(v))))
+  if (has(if (!is.null(sc)) sc$name) || has(p$labels$y)) return(p)
+  # the variable: the plot's title, or the one label on its x axis (JASP's one-sample plots put it there)
+  name <- if (is.character(plotTitle) && length(plotTitle) == 1 && plotTitle %in% apaVariables) plotTitle else {
+    lab <- tryCatch(ggplot2::ggplot_build(p)$layout$panel_params[[1]]$x$get_labels(), error = function(e) NULL)
+    lab <- if (is.character(lab)) unique(lab[!is.na(lab) & nzchar(lab)]) else character()
+    # the plot still holds JASP's encoded names (they are decoded when it's drawn)
+    decode <- get0(".decodeColNamesLax", envir = globalenv(), ifnotfound = identity)
+    if (length(lab) == 1 && decode(lab) %in% apaVariables) decode(lab) else NULL
+  }
+  if (!is.null(name)) {
+    if (!is.null(sc)) sc$name <- name else p <- p + ggplot2::ylab(name)
+    attr(p, "apaChanges") <- c(attr(p, "apaChanges"), sprintf("y axis title '%s' added", name))
+  }
+  p
+}
 apaPanelIn <- Inf   # printed width of one panel in a matrix layout, set by figures.R; narrow panels get fewer ticks
 apaPlot <- function(p) {
   changes <- local({ v <- character(); list(add = function(x) v <<- c(v, x), get = function() v) })
   bounded <- isBoundedPlot(p)
-  if (inherits(p, "ggplot")) p <- boundedText(apaGgplot(p, changes), bounded)
+  if (inherits(p, "ggplot")) p <- fillBreaks(boundedText(apaGgplot(p, changes), bounded))
   else if (inherits(p, "jaspGraphsPlot")) for (i in seq_along(p$subplots)) if (inherits(p$subplots[[i]], "ggplot")) {
     q <- boundedText(apaGgplot(p$subplots[[i]], changes), bounded)
     # matrix layouts: little room per panel, so fewer ticks and text in the panels at 9 pt (JASP sizes it for its
@@ -180,8 +209,11 @@ plotFacts <- function(p) {
       v <- if (!is.null(sc) && !inherits(sc$name, "waiver") && !is.null(sc$name)) sc$name else g$labels[[x]]
       if (is.character(v)) v[1] else if (is.null(v)) NA_character_ else paste(deparse(v), collapse = "")
     }
+    # an axis the plot hides (JASP's dot plots hide the count axis) needs no title
+    th <- tryCatch(ggplot2:::plot_theme(g), error = function(e) NULL)
+    hidden <- function(a) !is.null(th) && isTRUE(tryCatch(inherits(ggplot2::calc_element(paste0("axis.text.", a), th), "element_blank"), error = function(e) FALSE))
     list(geoms = unique(geoms), x = lab("x"), y = lab("y"), colour = lab("colour"), fill = lab("fill"), shape = lab("shape"),
-         linetype = lab("linetype"), text = unique(txt))
+         linetype = lab("linetype"), text = unique(txt), xHidden = hidden("x"), yHidden = hidden("y"))
   }
   if (inherits(p, "ggplot")) return(list(panels = 1L, plots = list(one(p))))
   if (inherits(p, "jaspGraphsPlot")) {
@@ -235,6 +267,22 @@ noLeadingZero <- function(l) {
   l
 }
 # Crowded multi-panel axes: keep every other tick number (first and last stay, so the axis spans the same range)
+# An axis showing fewer than 3 numbers (JASP's one-sample plot: "8" and "16") can't be read: evenly spaced ticks
+# between the same two ends (8, 10, 12, 14, 16), only when such ticks land exactly on both ends
+fillBreaks <- function(p) {
+  for (a in c("x", "y")) {
+    sc <- p$scales$get_scales(a)
+    if (is.null(sc) || !inherits(sc, "ScaleContinuous") || !is.numeric(sc$breaks) || length(sc$breaks) != 2) next
+    tr <- tryCatch(sc$get_transformation()$name, error = function(e) "identity")
+    if (!identical(tr, "identity") || !(inherits(sc$labels, "waiver") || is.function(sc$labels))) next
+    b <- sort(sc$breaks); nb <- pretty(b, n = 4)
+    if (length(nb) >= 3 && isTRUE(all.equal(range(nb), b))) {
+      sc$breaks <- nb
+      sc$labels <- function(x) trueMinus(format(x, trim = TRUE, drop0trailing = TRUE, scientific = FALSE))
+    }
+  }
+  p
+}
 thinBreaks <- function(p) {
   for (a in c("x", "y")) {
     sc <- p$scales$get_scales(a)

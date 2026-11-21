@@ -44,6 +44,7 @@ for (i in seq_along(opts)) {
   setTimeLimit(elapsed = Inf)
   if (!is.null(res)) rerun[i] <- list(res$results)   # [i] <- list(): a NULL result must not shift the others
   decode <- get(".decodeColNamesLax", envir = globalenv())
+  decodeNames <- function(x) if (is.character(x)) decode(x) else x
   for (fig in res$state$figures) {
     size <- function(v, fallback) if (is.numeric(v) && length(v) == 1 && is.finite(v) && v > 0) v else fallback
     w <- size(fig$width, 480) / 72; h <- size(fig$height, 320) / 72   # JASP's default size when a plot has none
@@ -65,7 +66,7 @@ for (i in seq_along(opts)) {
     } else if (cols > 8) {
       "too many panels to fit even a landscape page with readable text"   # JASP's own picture is better
     } else tryCatch({
-      q <- apaPlot(fig$obj)
+      q <- nameYAxis(apaPlot(fig$obj), decodeNames(fig$title))
       ragg::agg_png(file.path(outDir, png), width = w, height = h, units = "in", res = dpi * k); drawJasp(q); dev.off()
       # a picture of one flat colour means nothing was drawn (some plot kinds draw outside ggplot)
       pixels <- png::readPNG(file.path(outDir, png))
@@ -73,10 +74,15 @@ for (i in seq_along(opts)) {
     }, error = function(e) { while (dev.cur() > 1) dev.off(); conditionMessage(e) })
     # names decoded for the caller (titles, facts), but the picture's file name stays as written
     entry <- rapply(list(analysis = i, name = fig$getUnique, title = fig$title, error = if (isTRUE(drawn)) NULL else drawn,
-      widthIn = w * k, heightIn = h * k, landscape = landscape, facts = tryCatch(plotFacts(fig$obj), error = function(e) NULL), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
+      widthIn = w * k, heightIn = h * k, landscape = landscape, facts = tryCatch(plotFacts(if (is.null(q)) fig$obj else q), error = function(e) NULL), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
       decode, classes = "character", how = "replace")
     entry$png <- if (isTRUE(drawn)) png else NULL
     figures[[length(figures) + 1]] <- entry
+  }
+  if (is.null(err) && !is.null(res) && !identical(as.character(res$status), "complete")) {
+    # JASP's own message (an analysis that stops with a fatal error), as plain text: the first line that says something
+    m <- unlist(res$results); m <- m[grepl("errorMessage", names(m))]
+    if (length(m)) err <- head(Filter(nzchar, trimws(gsub("<[^>]+>", "", strsplit(m[[1]], "<br>", fixed = TRUE)[[1]]))), 2) |> paste(collapse = " ")
   }
   analyses[[i]] <- list(analysis = i, name = attr(o, "analysisName"), status = if (is.null(res)) "error" else as.character(res$status),
     error = err, seconds = round(as.numeric(Sys.time() - t0, units = "secs"), 1))

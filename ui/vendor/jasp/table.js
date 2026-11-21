@@ -2581,9 +2581,17 @@ function _apaFigureIntervalNote(info) {
 	for (let plot of ((info.facts && info.facts.plots) || []))
 		geoms = geoms.concat(plot.geoms || []);
 	let known = !!info.facts;
-	let hasBars = geoms.some(function (g) { return /Errorbar|Linerange|Pointrange|Crossbar/.test(g); });
-	let hasBand = geoms.some(function (g) { return /Ribbon|Smooth/.test(g); });
+	let hasBox = geoms.some(function (g) { return /Boxplot/.test(g); });
+	// a box plot's whiskers are drawn as error bars: the box sentence explains them
+	let hasBars = !hasBox && geoms.some(function (g) { return /Errorbar|Linerange|Pointrange|Crossbar/.test(g); });
 	let name = (info.plotName || "") + " " + (info.title || "");
+	// Bands: only where an option of this plot asks for one (marginalPlotCi for marginal plots, qqPlotCi for Q-Q
+	// plots); a density plot's filled shape is drawn as a ribbon too, and other plots' options don't count
+	let lowerName = (info.plotName || "").toLowerCase();
+	let ownOption = function (key) { let stem = key.replace(/[A-Z].*$/, "").toLowerCase(); return stem.length >= 2 && lowerName.indexOf(stem) !== -1; };
+	let bandCi = Object.keys(options).filter(function (k) { return /Ci$/.test(k) && options[k] === true && ownOption(k) && typeof options[k + "Level"] === "number"; });
+	let bandPi = Object.keys(options).filter(function (k) { return /PredictionInterval$/.test(k) && options[k] === true && ownOption(k); });
+	let hasBand = geoms.some(function (g) { return /Ribbon|Smooth/.test(g); }) && bandCi.length > 0;
 	// Option families: bar plots, descriptives plots; their keys share a prefix (barPlotErrorBarType, descriptivePlotCiLevel)
 	let prefix = /bar ?plot/i.test(name) ? /^barPlot/ : /descripti/i.test(name) ? /^descriptives?Plot/ : null;
 	let pick = function (pattern) {
@@ -2597,21 +2605,46 @@ function _apaFigureIntervalNote(info) {
 	let bayes = /Bayes/i.test(info.analysisName || "");
 	let within = (options.normalizeErrorBarsDescriptives === true || options.normalizeErrorBarsBarplot === true) && /RepeatedMeasures/.test(info.analysisName || "");
 
+	let sentences = [];
+	if (hasBox) {
+		sentences.push(i18n("Boxes show the middle 50% of scores, with the median as a line; whiskers reach the most extreme scores within 1.5 times the box's length."));
+		if (geoms.some(function (g) { return /Violin|Density|Flat|Polygon/i.test(g); }))
+			sentences.push(i18n("The shaded shapes show the distribution of scores."));
+		if (geoms.some(function (g) { return /^Geom(Jasp)?Point$|Jitter/.test(g); }))
+			sentences.push(i18n("Dots show individual scores."));
+	}
+	// rug marks (regression marginal plots): one tick per observed value along the axis
+	let rug = geoms.some(function (g) { return /Rug/.test(g); }) ? i18n("Tick marks along the x axis show the observed values.") : null;
+	let joined = function (more) { return { text: sentences.concat(more ? [more] : [], rug ? [rug] : []).join(" ") }; };
+	// JASP's Descriptives interval plot: the mean with mean ± 1.96 standard errors
+	if (/IntervalPlot/.test(info.plotName || "") && /^Descriptives$/.test(info.analysisName || ""))
+		return joined(i18n("Points show means; error bars represent 95% confidence intervals."));
+	// t tests' descriptives plots have a level and no type: their bars are always confidence intervals
+	if (prefix && type === undefined && level !== undefined && !switchedOff && (hasBars || !known))
+		type = "ci";
 	if (prefix && (hasBars || (!known && !switchedOff && type !== undefined))) {
 		if (type === "se")
-			return { text: i18n("Error bars represent standard errors") + (within ? i18n(", adjusted for the within-subjects design") : "") + "." };
+			return joined(i18n("Error bars represent standard errors") + (within ? i18n(", adjusted for the within-subjects design") : "") + ".");
 		if (type === "ci" || (bayes && level !== undefined))
-			return { text: i18n("Error bars represent") + " " + percent(level) + " " + (bayes ? i18n("credible intervals") : i18n("confidence intervals")) + (within ? i18n(", adjusted for the within-subjects design") : "") + "." };
+			return joined(i18n("Error bars represent") + " " + percent(level) + " " + (bayes ? i18n("credible intervals") : i18n("confidence intervals")) + (within ? i18n(", adjusted for the within-subjects design") : "") + ".");
 	}
 	if (hasBars)
 		return { todo: i18n("say what the error bars show") };
+	// JASP draws a confidence interval as a shaded band and a prediction interval as two dashed lines
+	let ci = bandCi.length === 1 ? percent(options[bandCi[0] + "Level"]) : null;
+	let pi = bandPi.length === 1 ? percent(options[bandPi[0] + "Level"]) : null;
+	if (known && pi && geoms.some(function (g) { return /Line/.test(g); })) {
+		if (hasBand && ci)
+			return joined(i18n("The shaded band shows the") + " " + ci + " " + i18n("confidence interval and the dashed lines the") + " " + pi + " " + i18n("prediction interval") + ".");
+		if (!hasBand)
+			return joined(i18n("The dashed lines show the") + " " + pi + " " + i18n("prediction interval") + ".");
+	}
 	if (hasBand) {
-		let bandLevel = Object.keys(options).filter(function (k) { return /CiLevel$/.test(k) && options[k.replace(/Level$/, "")] === true; });
-		if (bandLevel.length === 1)
-			return { text: i18n("The shaded band shows the") + " " + percent(options[bandLevel[0]]) + " " + i18n("confidence interval") + "." };
+		if (ci && bandPi.length === 0)
+			return joined(i18n("The shaded band shows the") + " " + ci + " " + i18n("confidence interval") + ".");
 		return { todo: i18n("say what the shaded band shows") };
 	}
-	return null;
+	return sentences.length > 0 ? joined() : null;
 }
 
 // The text width of a portrait page with 1 in margins (US Letter; A4 is 6.27 in)
@@ -2633,11 +2666,57 @@ function _apaSuggestFigureTitle(facts) {
 	};
 	let x = word(plot.x), y = word(plot.y);
 	let legend = word(plot.colour) || word(plot.fill) || word(plot.shape) || word(plot.linetype);
+	if (x && /^total$/i.test(x) && y)  // JASP's label when the scores aren't split into groups
+		return apaTitleCase(i18n("Distribution of")) + " " + y;
 	if (x && (!y || /^(density|counts?|frequency|proportion|percent(age)?)$/i.test(y)))
 		return apaTitleCase("Distribution of " + x);
 	if (!x || !y || /quantile|residual|fitted|predicted|index|observation/i.test(x + " " + y))
 		return null;  // diagnostic plots: their JASP title says it better
 	return apaTitleCase(y + " by " + x + (legend && legend !== x && legend !== y ? " and " + legend : ""));
+}
+
+function _apaFigureTitleFromKind(info) {
+	/**
+	 * A title for diagnostic plots, whose axes don't make one: "Q-Q Plot of Standardized Residuals for Sales",
+	 * "Partial Regression Plot for Adverts", "Residuals by Airplay". Null for other plots.
+	 */
+	let name = info.plotName || "";
+	let variables = info.variables || [];
+	let last = name.split("_").pop();
+	let variable = variables.indexOf(last) !== -1 ? last : null;
+	let dependent = typeof (info.options || {}).dependent === "string" && info.options.dependent ? info.options.dependent : null;
+	let forDependent = dependent ? " " + i18n("for") + " " + dependent : "";
+	let analysis = info.analysisName || "";
+	let pair = /_([^_]+) - ([^_]+)$/.exec(name);
+	if (/^TTestOneSample/.test(analysis) && /descripti|barPlot/i.test(name) && variable)
+		return apaTitleCase(i18n("Mean")) + " " + variable + (typeof (info.options || {}).testValue === "number" ? " " + apaTitleCase(i18n("compared with the test value of")) + " " + info.options.testValue : "");
+	if (/^TTestOneSample/.test(analysis) && /rain/i.test(name) && variable)
+		return apaTitleCase(i18n("Distribution of")) + " " + variable;
+	if (/^TTestPaired/.test(analysis) && pair) {
+		let both = pair[1] + " " + i18n("and") + " " + pair[2];
+		if (/CloudDifference/i.test(name))
+			return apaTitleCase(i18n("Distribution of the differences between")) + " " + both;
+		return /rain/i.test(name) ? apaTitleCase(i18n("Distribution of")) + " " + both : apaTitleCase(i18n("Means of")) + " " + both;
+	}
+	if (/IntervalPlot/.test(name) && variable)
+		return apaTitleCase(i18n("Mean of")) + " " + variable;
+	if (/matrixPlot|corrPlot/.test(name) && variables.length >= 2) {
+		let list = variables.length === 2 ? variables.join(" " + i18n("and") + " ") : variables.slice(0, -1).join(", ") + ", " + i18n("and") + " " + variables[variables.length - 1];
+		return apaTitleCase(i18n("Correlations among")) + " " + list;
+	}
+	if (/qq/i.test(name))
+		return variable && !/residual/i.test(name) ? apaTitleCase(i18n("Q-Q plot of")) + " " + variable : apaTitleCase(i18n("Q-Q plot of standardized residuals")) + forDependent;
+	if (/partialPlot/i.test(name) && variable)
+		return apaTitleCase(i18n("Partial regression plot for")) + " " + variable;
+	if (/residualsVsCov/i.test(name) && variable)
+		return apaTitleCase(i18n("Residuals by")) + " " + variable;
+	if (/residualsVsPred/i.test(name))
+		return apaTitleCase(i18n("Residuals by predicted values")) + forDependent;
+	if (/residualsVsDep/i.test(name))
+		return apaTitleCase(i18n("Residuals by observed values")) + forDependent;
+	if (/residualsVsHist/i.test(name))
+		return apaTitleCase(i18n("Distribution of standardized residuals")) + forDependent;
+	return null;
 }
 
 function buildAPAFigure(info, figureNumber) {
@@ -2661,9 +2740,16 @@ function buildAPAFigure(info, figureNumber) {
 	let titleHtml = _apaEscape(title);
 	let variables = info.variables || [];
 	let namesVariable = variables.some(function (v) { return v && new RegExp("(^|\\W)" + v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\W|$)", "i").test(raw); });
+	// Titles made of JASP's section names around a variable ("Descriptives: Descriptives Plots: Mischief") say little:
+	// a title from the plot's axes says more, when there is one
+	let generic = /^(descriptives?( plots?)?|assumption checks|inferential plots|plots?|descriptives plots?|bar plots?|raincloud plots?|q-q plots?)$/i;
+	let meaningful = (info.containerTitles || []).concat(info.title ? [info.title] : []).map(_apaPlain).filter(function (t) { return t.trim() !== "" && !generic.test(t.trim()); });
+	let onlyNames = meaningful.length > 0 && meaningful.every(function (t) { return variables.indexOf(t.trim()) !== -1 || /^\S+ - \S+$/.test(t.trim()); });
+	if (namesVariable && onlyNames && (_apaFigureTitleFromKind(info) || _apaSuggestFigureTitle(info.facts)))
+		namesVariable = false;
 	if (!namesVariable || raw.trim() === "") {
 		// A title from what the plot draws ("Heart Rate by Group and Gender"), for the student to check
-		let suggested = _apaSuggestFigureTitle(info.facts);
+		let suggested = _apaFigureTitleFromKind(info) || _apaSuggestFigureTitle(info.facts);
 		if (suggested) {
 			titleHtml = _apaTodo(suggested).replace(/>\[|\]</g, function (m) { return m[0] === ">" ? ">" : "<"; });
 			todo.push(i18n("check the suggested title"));
@@ -2684,6 +2770,17 @@ function buildAPAFigure(info, figureNumber) {
 	else if (interval && interval.todo) {
 		notes.push(_apaTodo(interval.todo) + ".");
 		todo.push(interval.todo);
+	}
+	// The one-sample t test's descriptives and bar plots draw the test value as a dashed line
+	let options = info.options || {};
+	if (/^TTestOneSample/.test(info.analysisName || "") && /descripti|barPlot/i.test(info.plotName || "") && typeof options.testValue === "number")
+		notes.push(i18n("The dashed line shows the test value of") + " " + options.testValue + ".");
+	// A plot of data whose y axis has no title (the paired t test's plots): the note says what it shows
+	let firstPlot = info.facts && info.facts.plots && info.facts.plots[0];
+	if (firstPlot && !firstPlot.yHidden && (firstPlot.y === null || (typeof firstPlot.y === "string" && firstPlot.y.trim() === "")) && info.facts.panels === 1
+		&& (firstPlot.geoms || []).some(function (g) { return !/Text|Label|Blank|RangeFrame/.test(g); })) {
+		notes.push(_apaTodo(i18n("say what the y axis shows")) + ".");
+		todo.push(i18n("say what the y axis shows"));
 	}
 	// Abbreviations in the figure (axis titles, legends, text in the plot) written out, as for tables (APA 7, 7.28)
 	let words = [raw];

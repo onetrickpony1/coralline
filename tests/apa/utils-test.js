@@ -965,7 +965,7 @@ function test_buildAPAFigure() {
 	var plain = buildAPAFigure({ title: "Q-Q Plot Standardized Residuals", plotName: "modelContainer_residualsQQPlot", analysisName: "RegressionLinear",
 		options: { qqPlotCi: false, qqPlotCiLevel: 0.95 }, facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomPoint"] }] } }, 3);
 	t(plain.html.indexOf("Error bars") === -1 && plain.html.indexOf("<i>Note.</i>") === -1, true, "figure: no note when there is nothing to explain");
-	t(plain.html.indexOf("<i>Q-Q Plot Standardized Residuals ") !== -1, true, "figure: title kept in title case, italic");
+	t(plain.html.indexOf("<i><span") !== -1 && plain.text.split("\n")[1] === "Q-Q Plot of Standardized Residuals", true, "figure: a diagnostic plot's title is suggested in italics, marked to check");
 
 	var robust = buildAPAFigure({ title: "Bayes Factor Robustness Check", plotName: "ttestContainer_inferentialPlots_drp_robustnessPlot", analysisName: "TTestBayesianIndependentSamples",
 		options: {}, facts: { panels: 2, plots: [{ geoms: ["GeomLine", "GeomPoint"], x: "Cauchy prior width", y: "BF[10]", text: ["max BF[10]"] }] }, variables: ["drp"] }, 4);
@@ -986,6 +986,52 @@ function test_buildAPAFigure() {
 	t(wide.html.indexOf("width: 8.40in") !== -1, true, "figure: a wide figure keeps its size");
 	var narrow = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 6.5, heightIn: 4 } }, 1);
 	t(narrow.html.indexOf("landscape") === -1, true, "figure: a page-wide figure fits portrait");
+
+	// Notes checked against APA 7 for the plots of t tests, descriptives, ANOVA and regression
+	var note = function (f) { return f.text.split("\n").slice(3).join(" "); };
+	var ttestDesc = buildAPAFigure({ title: "Mischief", containerTitles: ["Descriptives", "Descriptives Plots"], plotName: "ttestDescriptives_plots_Mischief", analysisName: "TTestIndependentSamples",
+		options: { descriptivesPlot: true, descriptivesPlotCiLevel: 0.99 }, facts: { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomPoint"], x: "Cloak", y: "Mischief" }] }, variables: ["Mischief", "Cloak"] }, 1);
+	t(note(ttestDesc).indexOf("Error bars represent 99% confidence intervals.") !== -1, true, "figure: t test descriptives plots show confidence intervals at their level");
+	t(ttestDesc.text.split("\n")[1], "Mischief by Cloak", "figure: a title of section names gets one from the axes");
+	var oneSample = buildAPAFigure({ title: "", plotName: "ttestDescriptives_plots_Difference", analysisName: "TTestOneSample", options: { descriptivesPlotCiLevel: 0.95, testValue: 16 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomPoint", "GeomHline"], x: null, y: "Difference" }] }, variables: ["Difference"] }, 1);
+	t(note(oneSample).indexOf("Error bars represent 95% confidence intervals. The dashed line shows the test value of 16.") !== -1, true, "figure: the one-sample test value line is explained");
+	var paired = buildAPAFigure({ title: "Moon - Other", plotName: "ttestDescriptives_plots_Moon - Other", analysisName: "TTestPairedSamples", options: { descriptivesPlotCiLevel: 0.95 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomPoint", "GeomLine"], x: null, y: null }] }, variables: ["Moon", "Other"] }, 1);
+	t(paired.todo.indexOf("say what the y axis shows") !== -1, true, "figure: an unlabelled y axis is explained in the note");
+	var rain = buildAPAFigure({ title: "Mischief", plotName: "ttestDescriptives_plotsRainCloud_Mischief", analysisName: "TTestIndependentSamples", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomFlatViolin", "GeomBoxplot", "GeomErrorbar", "GeomPoint"], x: "Cloak", y: "Mischief" }] }, variables: ["Mischief", "Cloak"] }, 1);
+	t(note(rain).indexOf("Boxes show the middle 50% of scores") !== -1 && note(rain).indexOf("distribution of scores") !== -1 && rain.todo.indexOf("say what the error bars show") === -1, true, "figure: box plots explain the box, not error bars");
+	var density = buildAPAFigure({ title: "sales", plotName: "densityPlot_sales", analysisName: "Descriptives", options: { scatterPlotRegressionLineCi: true, scatterPlotRegressionLineCiLevel: 0.95 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomRibbon", "GeomLine"], x: "sales", y: "Density" }] }, variables: ["sales"] }, 1);
+	t(note(density).indexOf("band") === -1, true, "figure: a density's filled shape isn't a confidence band");
+	var interval = buildAPAFigure({ title: "sales", plotName: "IntervalPlots_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomErrorbar"], x: null, y: "sales" }] }, variables: ["sales"] }, 1);
+	t(note(interval).indexOf("Points show means; error bars represent 95% confidence intervals.") !== -1, true, "figure: interval plots explained");
+	var marginal = buildAPAFigure({ title: "adverts", plotName: "marginalPlotsContainer_adverts", analysisName: "RegressionLinear",
+		options: { coefficientCi: true, coefficientCiLevel: 0.95, marginalPlotCi: true, marginalPlotCiLevel: 0.95, marginalPlotPredictionInterval: true, marginalPlotPredictionIntervalLevel: 0.9 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomRibbon", "GeomLine"], x: "adverts", y: "sales" }] }, variables: ["adverts", "sales"] }, 1);
+	t(note(marginal).indexOf("The shaded band shows the 95% confidence interval and the dashed lines the 90% prediction interval.") !== -1, true, "figure: the confidence band and the dashed prediction lines both explained");
+	var marginalRug = buildAPAFigure({ title: "adverts", plotName: "marginalPlotsContainer_adverts", analysisName: "RegressionLinear", options: { marginalPlotPredictionInterval: true, marginalPlotPredictionIntervalLevel: 0.95 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomRug"], x: "adverts", y: "sales" }] }, variables: ["adverts", "sales"] }, 1);
+	t(note(marginalRug).indexOf("The dashed lines show the 95% prediction interval. Tick marks along the x axis show the observed values.") !== -1, true, "figure: prediction lines alone, and rug marks, explained");
+	var qqReg = buildAPAFigure({ title: "Q-Q Plot Standardized Residuals", plotName: "modelContainer_residualsQQPlot", analysisName: "RegressionLinear", options: { dependent: "sales" },
+		facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomLine"], x: "Theoretical quantiles", y: "Observed quantiles" }] }, variables: ["sales", "adverts"] }, 1);
+	t(qqReg.text.split("\n")[1], "Q-Q Plot of Standardized Residuals for sales", "figure: a regression Q-Q plot gets a title naming the outcome");
+	var partial = buildAPAFigure({ title: "", plotName: "partialPlotContainer_adverts", analysisName: "RegressionLinear", options: { dependent: "sales" },
+		facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomLine"], x: "Residuals adverts", y: "Residuals sales" }] }, variables: ["sales", "adverts"] }, 1);
+	t(partial.text.split("\n")[1], "Partial Regression Plot for adverts", "figure: partial regression plots name their predictor");
+	var jaspPicture = buildAPAFigure({ title: "Mischief", plotName: "ttestDescriptives_plots_Mischief", analysisName: "TTestIndependentSamples", options: { descriptivesPlot: true, descriptivesPlotCiLevel: 0.95 }, facts: null, variables: ["Mischief"] }, 1);
+	t(note(jaspPicture).indexOf("Error bars represent 95% confidence intervals.") !== -1, true, "figure: JASP's own picture still gets its error bars explained");
+	var dots = buildAPAFigure({ title: "sales", plotName: "DotPlots_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomDotplot"], x: "sales", y: null, yHidden: true }] }, variables: ["sales"] }, 1);
+	t(dots.todo.indexOf("say what the y axis shows"), -1, "figure: a hidden axis needs no title");
+	var box = buildAPAFigure({ title: "sales", plotName: "boxPlot_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBoxplot", "GeomPoint"], x: "Total", y: "sales" }] }, variables: ["sales"] }, 1);
+	t(box.text.split("\n")[1] + " | " + (note(box).indexOf("Dots show individual scores.") !== -1), "Distribution of sales | true", "figure: an ungrouped box plot is a distribution, its dots explained");
+	var oneTitle = buildAPAFigure({ title: "", plotName: "ttestDescriptives_plots_Difference", analysisName: "TTestOneSample", options: { testValue: 16, descriptivesPlotCiLevel: 0.95 }, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], x: null, y: "Difference" }] }, variables: ["Difference"] }, 1);
+	t(oneTitle.text.split("\n")[1], "Mean Difference Compared With the Test Value of 16", "figure: one-sample plot title");
+	var pairTitle = buildAPAFigure({ title: "Moon - Other", containerTitles: ["Descriptives", "Descriptives Plots"], plotName: "ttestDescriptives_plots_Moon - Other", analysisName: "TTestPairedSamples", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], x: null, y: null }] }, variables: ["Moon", "Other"] }, 1);
+	t(pairTitle.text.split("\n")[1], "Means of Moon and Other", "figure: paired plot title names both measures");
+	var matrix = buildAPAFigure({ title: "Correlation plot", plotName: "matrixPlot", analysisName: "Descriptives", options: {}, facts: { panels: 9, plots: [] }, variables: ["sales", "adverts", "airplay"] }, 1);
+	t(matrix.text.split("\n")[1], "Correlations Among sales, adverts, and airplay", "figure: correlation matrix title lists the variables");
 }
 
 function runAllUtilTests() {
