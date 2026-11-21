@@ -1,6 +1,6 @@
 # Development
 
-You need Rust 1.90 or newer and, on Linux, WebKitGTK 4.1 (`webkit2gtk-4.1` on Arch, `libwebkit2gtk-4.1-dev` on Debian and Ubuntu).
+You need Rust 1.90 or newer and, on Linux, WebKitGTK 4.1 and its build packages (`libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev` on Debian and Ubuntu, `webkit2gtk-4.1` on Arch).
 
 ```sh
 cd src-tauri
@@ -11,6 +11,13 @@ cargo test --no-default-features             # the .jasp reader, no WebKit neede
 ```
 
 `tests/ui/run.sh` uses JSON dumps in `tests/ui/fixtures/`, made with `coralline --json`. They aren't in the repo.
+
+Figures need Linux and JASP from [Flathub](https://flathub.org/apps/org.jaspstats.JASP): Coralline reruns the analyses in that JASP's own R. `coralline --figures FILE.jasp` prints a file's figures as JSON. The figure helpers have their own tests, run from `src-tauri/r` with JASP's R:
+
+```sh
+cd src-tauri/r
+flatpak run --command=Rscript --filesystem=$PWD org.jaspstats.JASP test-apastyle.R
+```
 
 The corpus check runs every table in JASP's Data Library through the copier and checks it: no crashes, every number of JASP's in the copy, APA *p* values, no exponents outside Bayes factors, every column headed, *N* from the tables matching *N* from the data.
 

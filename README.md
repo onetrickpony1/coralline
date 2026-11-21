@@ -36,6 +36,7 @@ Coralline is a formatting helper. It saves you the fiddly work of making JASP's 
 **What it does**
 
 - Takes the tables JASP has already made and lays them out in APA 7 style: the lines, the rounding, the italics, the "Table 1" above and the *Note.* below, with your sample size.
+- On Linux, with JASP installed from Flathub, does the same for your plots: each becomes a "Figure 1" with a title and a note.
 - Keeps your results as they are. The numbers are JASP's own, only rounded the APA way. Your JASP file is never changed.
 - Shows you every change it made, so you can check it.
 - Highlights the few things it can't know, like a good title for your table, and tells you what to write.
@@ -53,7 +54,9 @@ Coralline is a formatting helper. It saves you the fiddly work of making JASP's 
 
 If you aren't sure whether tools like this are allowed on your course, ask your tutor. Coralline is made by one person. It isn't made by the JASP team or by the APA.
 
-![Coralline with the Album Sales example open](docs/screenshot.png)
+![Coralline with a correlation example open](docs/screenshot.png)
+
+![A box plot of liking redrawn as an APA figure, with its number, title and note](docs/screenshot-figures.png)
 
 ## Features
 
@@ -63,7 +66,8 @@ If you aren't sure whether tools like this are allowed on your course, ask your 
 - **Sample size:** *N* goes in the note. It comes from what the analysis reports or, when its tables don't say, from the data saved in the file (rows that pass the filter with no missing values in the analysis's variables).
 - **Layouts APA expects:** descriptive statistics with variables in rows, correlation matrices with numbered columns and asterisks instead of *p* rows.
 - **What only you can add is highlighted:** a vague title, a missing heading or an unclear abbreviation is marked in yellow in the pasted table. Under each table, click a to-do for what to write, with an example, and how to remove the yellow afterwards.
-- **Fits the page:** column widths are measured so nothing wraps, and wide tables step down to a smaller type size.
+- **Fits the page:** tables paste in Times New Roman 12, with column widths measured so nothing wraps. A wide table steps down to as little as 9 pt. If it's still too wide, it asks for a landscape page, and if even that's too narrow, it asks you to split the table.
+- **APA figures** (Linux, with JASP from Flathub): the file's plots appear below the tables as APA figures, with their own numbers, a title and a note. Each plot is redrawn in APA style from your data when Coralline's rerun matches JASP's results. Otherwise JASP's own picture goes inside the APA title and note. A figure too wide for the page asks for a landscape page.
 
 In the app:
 
@@ -95,7 +99,8 @@ To see a file's tables as JSON instead: `coralline --json results.jasp`.
 - **Limitation:** means, *SD*s and similar values always keep the zero before the decimal point (0.45), as APA asks for statistics that can be greater than 1. For a variable that can't go above 1, such as a proportion from 0 to 1, APA's rule would also allow .45, but the app can't tell a variable's limits from the file. Remove those zeros by hand if you want them gone.
 - macOS builds are new: tell us through **Feedback and problems** if anything looks wrong.
 - The APA code sits in JASP's own results-page code (`ui/vendor/jasp`), so the tables come out as JASP draws them.
-- Building from source and the tests: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+- The APA 7 rules for figures, each with its source in the Publication Manual and how far Coralline meets it: [docs/figures/RULES.md](docs/figures/RULES.md).
+- Building from source and the tests: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Bug reports and fixes: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
