@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Features
-- **APA figures** (Linux, with JASP's Flatpak): the file's plots appear below the tables as APA figures, numbered apart from the tables, each with a copy button. A plot is redrawn in APA style from your data when its rerun in JASP's own R matches JASP's results; otherwise JASP's own picture goes inside the APA title and note. `japasp --figures FILE.jasp` prints the same as JSON.
+- **APA figures** (Linux, with JASP's Flatpak): the file's plots appear below the tables as APA figures, numbered apart from the tables, each with a copy button. A plot is redrawn in APA style from your data when its rerun in JASP's own R matches JASP's results; otherwise JASP's own picture goes inside the APA title and note. `japasp --figures FILE.jasp` prints the same as JSON. Text stays between 8 and 14 pt: a figure too wide for a portrait page keeps its size and asks for a landscape page, and busy correlation matrices grow until their panels are readable. A title that names no variable gets a suggested one from the plot's axes, marked for you to check. **Copy picture only** puts just the picture on the clipboard, for when pasting the whole figure leaves it out.
 
 ### Fixes
 - **On Windows the taskbar and Start menu icon follow the theme.** They stayed blue in dark mode, because Windows takes them from the big window icon and the shortcuts, which the app didn't change. A taskbar pin follows too.
