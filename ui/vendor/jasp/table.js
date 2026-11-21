@@ -2628,9 +2628,46 @@ function buildAPATable(tableElement, info, tableNumber) {
 
 // ========== APA figures ==========
 
+// A figure's info comes from outside JASP (an R rerun written by jsonlite), and its lists may not be arrays: a list
+// of one can arrive as a bare value ("geoms": "GeomPoint") and a named list as an object ("plots": { "mainPlot": ... },
+// from a jaspGraphsPlot's named subplots). Each list comes back as an array; anything else is left out.
+function _apaAsList(value) {
+	if (Array.isArray(value))
+		return value;
+	if (value === null || value === undefined)
+		return [];
+	if (typeof value === "object")
+		return Object.keys(value).map(function (k) { return value[k]; });
+	return [value];
+}
+
+function _apaFigureFacts(facts) {
+	if (!facts || typeof facts !== "object" || Array.isArray(facts))
+		return null;
+	let plots = _apaAsList(facts.plots).filter(function (p) { return p && typeof p === "object" && !Array.isArray(p); }).map(function (p) {
+		let plot = Object.assign({}, p);
+		plot.geoms = _apaAsList(p.geoms).filter(function (g) { return typeof g === "string"; });
+		if (p.text !== null && p.text !== undefined)
+			plot.text = _apaAsList(p.text).filter(function (t) { return typeof t === "string"; });
+		return plot;
+	});
+	return Object.assign({}, facts, { plots: plots });
+}
+
+function _apaFigureInfo(info) {
+	info = Object.assign({}, info || {});
+	info.facts = _apaFigureFacts(info.facts);
+	info.containerTitles = _apaAsList(info.containerTitles).filter(function (t) { return typeof t === "string"; });
+	info.variables = _apaAsList(info.variables).filter(function (v) { return typeof v === "string"; });
+	if (!info.options || typeof info.options !== "object" || Array.isArray(info.options))
+		info.options = {};
+	return info;
+}
+
 // Error bars and bands: what they show comes from the analysis options, whether they are drawn from the plot itself
 // (facts: the plot's layers, from the external tool's rerun; without facts the options alone decide)
 function _apaFigureIntervalNote(info) {
+	info = _apaFigureInfo(info);
 	let options = info.options || {};
 	let geoms = [];
 	for (let plot of ((info.facts && info.facts.plots) || []))
@@ -2734,7 +2771,8 @@ function _apaSuggestFigureTitle(facts) {
 	 * A figure title from what the plot draws: "Heart Rate by Group and Gender" (y by x and the legend), or
 	 * "Distribution of Sum Score" for histograms and densities. Null when the axes don't say enough.
 	 */
-	let plot = facts && facts.plots && facts.plots[0];
+	facts = _apaFigureFacts(facts);
+	let plot = facts && facts.plots[0];
 	if (!plot)
 		return null;
 	let word = function (v) {
@@ -2760,8 +2798,9 @@ function _apaFigureTitleFromKind(info) {
 	 * A title for diagnostic plots, whose axes don't make one: "Q-Q Plot of Standardized Residuals for Sales",
 	 * "Partial Regression Plot for Adverts", "Residuals by Airplay". Null for other plots.
 	 */
+	info = _apaFigureInfo(info);
 	let name = info.plotName || "";
-	let variables = info.variables || [];
+	let variables = info.variables;
 	let last = name.split("_").pop();
 	let variable = variables.indexOf(last) !== -1 ? last : null;
 	let dependent = typeof (info.options || {}).dependent === "string" && info.options.dependent ? info.options.dependent : null;
@@ -2817,6 +2856,7 @@ function buildAPAFigure(info, figureNumber) {
 	 * @param figureNumber	number shown in "Figure N" (figures are numbered apart from tables)
 	 * @returns { html, text, todo, changes }
 	 */
+	info = _apaFigureInfo(info);
 	let log = _apaChangeLog(null);
 	let todo = [];
 	let notes = [];

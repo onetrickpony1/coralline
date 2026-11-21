@@ -1185,7 +1185,7 @@
 		if (!data || !state.file)
 			return [];
 		let number = 0;
-		return (data.figures || []).filter(function (fig) { return fig.src || fig.original; }).map(function (fig, k) {
+		return (Array.isArray(data.figures) ? data.figures : []).filter(function (fig) { return fig && (fig.src || fig.original); }).map(function (fig, k) {
 			const item = { key: "f" + k, fig: fig, number: ++number, redrawn: !!(fig.trusted && fig.src) };
 			try {
 				item.apa = buildAPAFigure(figureInfo(fig, data), item.number);

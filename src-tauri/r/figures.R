@@ -121,6 +121,7 @@ for (i in seq_along(opts)) {
     entry <- rapply(list(analysis = i, name = fig$getUnique, title = fig$title, error = if (isTRUE(drawn)) NULL else drawn,
       widthIn = w * k, heightIn = h * k, landscape = landscape, facts = tryCatch(plotFacts(if (is.null(q)) fig$obj else q), error = function(e) NULL), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
       decode, classes = "character", how = "replace")
+    entry$facts <- factsArrays(entry$facts)
     entry$png <- if (isTRUE(drawn)) png else NULL
     figures[[length(figures) + 1]] <- entry
   }

@@ -1130,6 +1130,18 @@ function test_buildAPAFigure() {
 	t(note(qqNote).indexOf("The diagonal line shows where") !== -1, true, "figure: the Q-Q diagonal explained");
 	var matrix = buildAPAFigure({ title: "Correlation plot", plotName: "matrixPlot", analysisName: "Descriptives", options: {}, facts: { panels: 9, plots: [] }, variables: ["sales", "adverts", "airplay"] }, 1);
 	t(matrix.text.split("\n")[1], "Correlations Among sales, adverts, and airplay", "figure: correlation matrix title lists the variables");
+	// Lists from R's JSON writer that aren't arrays: a jaspGraphsPlot's named subplots become an object, a list of one a bare value
+	var named = buildAPAFigure({ title: "x1 - y1", containerTitles: ["Descriptives Plots"], plotName: "modelContainer_descriptivePlotsContainer_x1 - y1", analysisName: "RegressionLinear",
+		options: { descriptivePlotErrorBar: true, descriptivePlotErrorBarType: "ci", descriptivePlotCiLevel: 0.95 },
+		facts: { panels: 1, plots: { mainPlot: { geoms: ["GeomJaspPoint", "GeomSmooth", "GeomRangeFrame"], x: "x1", y: "y1", text: null } } }, variables: ["x1", "y1"] }, 1);
+	t(named.text.split("\n")[1], "y1 by x1", "figure: facts with named plots (an object, not an array) still build");
+	var single = buildAPAFigure({ title: "", plotName: "descriptivesPlot", analysisName: "Anova", options: { descriptivePlotErrorBarType: "se" },
+		facts: { panels: 1, plots: [{ geoms: "GeomErrorbar", x: "group", y: "score", text: "SE" }] }, variables: ["group", "score"] }, 1);
+	t(note(single).indexOf("Error bars represent standard errors.") !== -1, true, "figure: a single geom as a bare string still counts");
+	var empty = buildAPAFigure({ title: "Plot", containerTitles: {}, plotName: "somePlot", analysisName: "Something", options: [], facts: { panels: 0, plots: {} }, variables: {} }, 1);
+	t(empty.text.split("\n")[0], "Figure 1", "figure: empty lists written as {} still build");
+	t(_apaSuggestFigureTitle({ plots: { mainPlot: { x: "x1", y: "y1" } } }), "y1 by x1", "figure: a suggested title from named plots");
+	t(_apaFigureIntervalNote({ plotName: "descriptivesPlot", options: { descriptivePlotErrorBarType: "ci", descriptivePlotCiLevel: 0.9 }, facts: { plots: { a: { geoms: "GeomErrorbar" } } } }).text, "Error bars represent 90% confidence intervals.", "figure: interval note from named plots and a bare geom");
 }
 
 function runAllUtilTests() {

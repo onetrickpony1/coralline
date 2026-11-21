@@ -234,9 +234,21 @@ plotFacts <- function(p) {
   if (inherits(p, "ggplot")) return(list(panels = 1L, plots = list(one(p))))
   if (inherits(p, "jaspGraphsPlot")) {
     subs <- Filter(function(s) inherits(s, "ggplot"), p$subplots)
-    return(list(panels = length(subs), plots = lapply(subs, one)))
+    # unnamed: jaspGraphsPlot names its subplots (mainPlot, ...), and a named list becomes a JSON object, not an array
+    return(list(panels = length(subs), plots = unname(lapply(subs, one))))
   }
   list(panels = NA, plots = list(), class = class(p)[1])
+}
+
+# The facts as JSON arrays: jsonlite's auto_unbox writes a list of one as a bare string ("geoms": "GeomPoint"),
+# and a named list (jaspGraphsPlot's subplots) as an object. Run after decoding: rapply skips AsIs vectors.
+factsArrays <- function(f) {
+  if (!is.list(f) || is.null(f$plots)) return(f)
+  f$plots <- unname(lapply(f$plots, function(p) {
+    for (k in c("geoms", "text")) if (!is.null(p[[k]])) p[[k]] <- I(as.character(p[[k]]))
+    p
+  }))
+  f
 }
 
 # Text in the plot such as "r = 0.578" or italic(r) == 0.578: APA drops the leading zero for values that can't

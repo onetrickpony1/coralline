@@ -69,4 +69,11 @@ check(apaTitleCaseAny(expression("replication effect")), expression("Replication
 check(apaTitleCaseAny(quote(hse ~ score)), quote(hse ~ Score), "plotmath: variable names stay")
 check(apaTitleCaseAny(""), "", "empty text")
 check(apaTitleCaseAny(5), 5, "a number is left alone")
+# facts as JSON: named subplots (jaspGraphsPlot's mainPlot) and lists of one must stay arrays
+facts <- list(panels = 1L, plots = list(mainPlot = list(geoms = "GeomPoint", x = "a", text = "r = .5")))
+check(as.character(jsonlite::toJSON(factsArrays(facts), auto_unbox = TRUE, null = "null")),
+  '{"panels":1,"plots":[{"geoms":["GeomPoint"],"x":"a","text":["r = .5"]}]}', "facts: named plots and single geoms become arrays")
+check(as.character(jsonlite::toJSON(factsArrays(list(panels = 0L, plots = setNames(list(), character()))), auto_unbox = TRUE)),
+  '{"panels":0,"plots":[]}', "facts: no plots is an empty array")
+check(factsArrays(NULL), NULL, "facts: none")
 cat(if (failed) paste(failed, "failed\n") else "all passed\n"); quit(status = failed > 0)
