@@ -1,6 +1,6 @@
 [package]
 name = "coralline"
-version = "0.1.0"
+version = "0.2.0"
 description = "Copies the tables in a saved JASP file as APA 7 tables, ready to paste into Word or Google Docs"
 license = "AGPL-3.0-or-later"
 edition = "2021"
