@@ -7,3 +7,4 @@ tests/corpus/fixtures/
 tests/corpus/.dom.html
 tests/corpus/report.json
 tests/corpus/report.html
+__pycache__/
