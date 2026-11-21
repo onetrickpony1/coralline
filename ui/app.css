@@ -357,6 +357,10 @@ body {
 	-webkit-backdrop-filter: blur(40px) saturate(160%);
 	backdrop-filter: blur(40px) saturate(160%);
 	transform-origin: top right;
+	/* never taller than the window: the rest scrolls (app.js sets --menu-room to the space below the button) */
+	max-height: var(--menu-room, calc(100vh - 90px));
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 @keyframes pop { from { opacity: 0; transform: scale(0.96) translateY(-4px); } }
 .menu > button {

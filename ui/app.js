@@ -1634,11 +1634,18 @@
 		menuButton.setAttribute("aria-expanded", String(on));
 		if (on) {
 			updateMenu();
+			fitMenu();
 			const first = menu.querySelector("button:not(:disabled), input");
 			if (first)
 				first.focus();
 		}
 	}
+	// The menu ends 12 px above the window's bottom edge and scrolls inside when it's longer than that
+	function fitMenu() {
+		const top = menuButton.getBoundingClientRect().bottom + 8;
+		menu.style.setProperty("--menu-room", Math.max(160, window.innerHeight - top - 12) + "px");
+	}
+	window.addEventListener("resize", function () { if (isShown(menu)) fitMenu(); });
 	menuButton.addEventListener("click", function (e) { e.stopPropagation(); toggleMenu(); });
 
 	// The shortcuts window rises in (CSS) and sinks out: closing waits for the animation, then closes the dialog
