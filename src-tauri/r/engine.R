@@ -55,40 +55,43 @@ formDefaults <- function(name) {
   NULL
 }
 # JASP's upgrade rules (each module's Upgrades.qml): when JASP opens an older file it renames analyses and options
-# that later versions renamed. The rerun applies the two simple kinds, a new function name and ChangeRename; rules
-# written in JavaScript (ChangeJS) can't run here, and an analysis they would change falls back to JASP's picture
-# through the trust check. A rule applies only when its old name is in the options (or the old function is gone)
-# and the new one isn't (an analysis that still has its old name predates the rename), so newer files aren't touched.
+# that later versions renamed. Like JASP, a step applies only to files saved by its fromVersion or an older one, and
+# the steps run in version order (some names were renamed and later renamed back). The rerun applies the two simple
+# kinds, a new function name and ChangeRename; steps written in JavaScript (ChangeJS) can't run here, and an
+# analysis they would change falls back to JASP's picture through the trust check. Without the version that saved
+# the analysis (attribute moduleVersion, from the file) nothing is applied.
 upgradeRules <- local({
   rules <- NULL
   function() {
     if (!is.null(rules)) return(rules)
-    rules <<- list()
+    found <- list()
     for (f in list.files(moduleRoot, pattern = "^Upgrades\\.qml$", recursive = TRUE, full.names = TRUE)) {
       text <- paste(readLines(f, warn = FALSE), collapse = "\n")
       for (block in strsplit(text, "\\bUpgrade\\s*\\{")[[1]][-1]) {
         field <- function(key) { m <- regmatches(block, regexec(paste0("\\b", key, ":\\s*\"([^\"]+)\""), block))[[1]]; if (length(m) > 1) m[2] else NA }
-        fn <- field("functionName"); if (is.na(fn)) next
+        fn <- field("functionName"); from <- field("fromVersion"); to <- field("toVersion")
+        if (is.na(fn) || is.na(from) || is.na(to)) next
         renames <- regmatches(block, gregexpr("ChangeRename\\s*\\{[^}]*\\}", block))[[1]]
         pairs <- lapply(renames, function(r) c(sub('.*from:\\s*"([^"]+)".*', "\\1", r), sub('.*to:\\s*"([^"]+)".*', "\\1", r)))
-        rules[[length(rules) + 1]] <<- list(fn = fn, newFn = field("newFunctionName"), renames = pairs)
+        rule <- list(fn = fn, newFn = field("newFunctionName"), from = from, to = to, renames = pairs)
+        key <- paste(fn, from, to, rule$newFn, paste(unlist(pairs), collapse = ","))
+        found[[key]] <- rule   # the same step appears in every bundled copy of a module
       }
     }
+    toV <- vapply(found, function(r) tryCatch(as.character(package_version(r$to)), error = function(e) "0"), "")
+    rules <<- unname(found[order(package_version(toV))])
     rules
   }
 })
 applyUpgrades <- function(o) {
+  v <- attr(o, "moduleVersion")
+  saved <- if (is.character(v) && length(v) == 1 && nzchar(v)) tryCatch(package_version(v), error = function(e) NULL)
+  if (is.null(saved)) return(o)
   name <- attr(o, "analysisName")
-  for (step in 1:5) {   # renames can chain (an analysis renamed, then its options)
-    changed <- FALSE
-    for (r in upgradeRules()) {
-      if (r$fn != name) next
-      for (pair in r$renames) if (pair[1] %in% names(o) && !pair[2] %in% names(o)) { names(o)[names(o) == pair[1]] <- pair[2]; changed <- TRUE }
-      if (!is.na(r$newFn) && r$newFn != name) {   # a file that still uses the old name predates the rename
-        name <- r$newFn; changed <- TRUE
-      }
-    }
-    if (!changed) break
+  for (r in upgradeRules()) {
+    if (r$fn != name || saved > tryCatch(package_version(r$from), error = function(e) package_version("0"))) next
+    for (pair in r$renames) if (pair[1] %in% names(o) && !pair[2] %in% names(o)) names(o)[names(o) == pair[1]] <- pair[2]
+    if (!is.na(r$newFn)) name <- r$newFn
   }
   attr(o, "analysisName") <- name
   o

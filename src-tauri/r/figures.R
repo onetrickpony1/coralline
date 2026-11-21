@@ -11,6 +11,17 @@ dir.create(outDir, showWarnings = FALSE, recursive = TRUE); dir.create(workDir, 
 
 # jaspTools writes its set-up into its own folder, which is read-only inside JASP: use a copy in the work folder
 libs <- list.dirs(modulesRoot, recursive = FALSE)
+rlib <- file.path(workDir, "rlib")
+src <- Filter(dir.exists, file.path(libs, "jaspTools"))[1]
+if (is.na(src)) stop("jaspTools not found in JASP's modules")
+# copied again when JASP brings a different jaspTools (an update), so the copy never goes stale
+same <- function(a, b) isTRUE(tryCatch(identical(readLines(a, warn = FALSE), readLines(b, warn = FALSE)), error = function(e) FALSE))
+if (!same(file.path(src, "DESCRIPTION"), file.path(rlib, "jaspTools", "DESCRIPTION"))) {
+  unlink(rlib, recursive = TRUE)
+  dest <- file.path(rlib, "jaspTools"); dir.create(dest, recursive = TRUE)
+  # the module library holds a link to a folder with a hash name: copy its contents under the package's own name
+  file.copy(list.files(normalizePath(src), full.names = TRUE, all.files = TRUE, no.. = TRUE), dest, recursive = TRUE)
+}
 
 # Each analysis runs with its own module's folder first, as in JASP, which starts an engine per module: modules bundle
 # copies of other modules in other versions (jaspAnova and jaspClassicalTests carry a newer jaspTTests and
@@ -19,13 +30,21 @@ libs <- list.dirs(modulesRoot, recursive = FALSE)
 analysisModules <- tryCatch({
   .libPaths(c(libs, .libPaths()))
   con <- unz(jaspFile, "analyses.json"); text <- paste(readLines(con, warn = FALSE), collapse = "\n"); close(con)
-  vapply(jsonlite::fromJSON(text, simplifyVector = FALSE)$analyses, function(a) { m <- a$dynamicModule$moduleName; if (is.character(m)) m else "" }, "")
+  saved <- jsonlite::fromJSON(text, simplifyVector = FALSE)$analyses
+  analysisVersions <- vapply(saved, function(a) { v <- a$dynamicModule$moduleVersion; if (is.character(v)) v else "" }, "")
+  vapply(saved, function(a) { m <- a$dynamicModule$moduleName; if (is.character(m)) m else "" }, "")
 }, error = function(e) character())
+if (!exists("analysisVersions") || length(analysisVersions) != length(analysisModules)) analysisVersions <- rep("", length(analysisModules))
 moduleList <- unique(analysisModules[nzchar(analysisModules)])
 onlyModule <- Sys.getenv("CORALLINE_MODULE")
 if (!nzchar(onlyModule) && length(moduleList) > 1) {
   script <- file.path(here, "figures.R"); rscript <- file.path(R.home("bin"), "Rscript")
-  for (m in moduleList) system2(rscript, shQuote(c(script, jaspFile, outDir, workDir, modulesRoot)), env = paste0("CORALLINE_MODULE=", m))
+  # side by side, so a file with two modules takes about as long as its slower module, not both added up; the very
+  # first run on this computer sets jaspTools up, which one session must finish before the others start
+  run <- function(m) system2(rscript, shQuote(c(script, jaspFile, outDir, workDir, modulesRoot)), env = paste0("CORALLINE_MODULE=", m))
+  rest <- moduleList
+  if (!file.exists(file.path(rlib, "jaspTools", "setup_complete.txt"))) { run(rest[1]); rest <- rest[-1] }
+  invisible(parallel::mccollect(lapply(rest, function(m) parallel::mcparallel(run(m))), wait = TRUE))
   analyses <- list(); figures <- list(); rerun <- vector("list", length(analysisModules))
   for (m in moduleList) {
     part <- tryCatch(jsonlite::read_json(file.path(outDir, paste0("figures-", m, ".json")), simplifyVector = FALSE), error = function(e) NULL)
@@ -46,17 +65,6 @@ if (nzchar(ownModule) && dir.exists(file.path(modulesRoot, ownModule)))
   libs <- c(file.path(modulesRoot, ownModule), setdiff(libs, file.path(modulesRoot, ownModule)))
 mine <- function(i) !nzchar(onlyModule) || i > length(analysisModules) || analysisModules[i] == onlyModule ||
   (!nzchar(analysisModules[i]) && onlyModule == moduleList[1])   # analyses without a module go with the first
-rlib <- file.path(workDir, "rlib")
-src <- Filter(dir.exists, file.path(libs, "jaspTools"))[1]
-if (is.na(src)) stop("jaspTools not found in JASP's modules")
-# copied again when JASP brings a different jaspTools (an update), so the copy never goes stale
-same <- function(a, b) isTRUE(tryCatch(identical(readLines(a, warn = FALSE), readLines(b, warn = FALSE)), error = function(e) FALSE))
-if (!same(file.path(src, "DESCRIPTION"), file.path(rlib, "jaspTools", "DESCRIPTION"))) {
-  unlink(rlib, recursive = TRUE)
-  dest <- file.path(rlib, "jaspTools"); dir.create(dest, recursive = TRUE)
-  # the module library holds a link to a folder with a hash name: copy its contents under the package's own name
-  file.copy(list.files(normalizePath(src), full.names = TRUE, all.files = TRUE, no.. = TRUE), dest, recursive = TRUE)
-}
 .libPaths(c(rlib, libs, .libPaths()))
 suppressPackageStartupMessages({ library(jaspTools); library(jaspBase); library(jaspGraphs) })
 if (!jaspTools:::.isSetupComplete()) suppressMessages(setupJaspTools(installJaspModules = FALSE, installJaspCorePkgs = FALSE, quiet = TRUE))
@@ -75,6 +83,7 @@ analyses <- list(); figures <- list(); rerun <- vector("list", length(opts))
 for (i in seq_along(opts)) {
   if (!mine(i)) next
   o <- opts[[i]]; err <- NULL; t0 <- Sys.time()
+  if (i <= length(analysisVersions) && nzchar(analysisVersions[i])) attr(o, "moduleVersion") <- analysisVersions[i]   # for JASP's upgrade rules
   setTimeLimit(elapsed = 180, transient = TRUE)
   res <- tryCatch(runJasp(o, ds), error = function(e) { err <<- conditionMessage(e); NULL })
   setTimeLimit(elapsed = Inf)
