@@ -401,6 +401,31 @@ fn images<'a>(value: &'a serde_json::Value, key: &str, titles: &[String], out: &
     }
 }
 
+/// The bytes of a base64 data URI ("data:image/png;base64,..."), or None when it isn't one
+pub fn data_uri_bytes(uri: &str) -> Option<Vec<u8>> {
+    let text = uri.strip_prefix("data:")?.split_once(";base64,")?.1;
+    let value = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let clean: Vec<u8> = text.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= value(*c)? << (18 - 6 * i);
+        }
+        out.extend(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    Some(out)
+}
+
 fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -482,5 +507,15 @@ mod tests {
         assert_eq!(super::base64(b"fo"), "Zm8=");
         assert_eq!(super::base64(b"foo"), "Zm9v");
         assert_eq!(super::base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn data_uris_decode_back() {
+        for text in [&b""[..], b"f", b"fo", b"foo", b"foobar", &[0, 255, 128, 7, 9]] {
+            let uri = format!("data:image/png;base64,{}", super::base64(text));
+            assert_eq!(super::data_uri_bytes(&uri).as_deref(), Some(text));
+        }
+        assert_eq!(super::data_uri_bytes("not a uri"), None);
+        assert_eq!(super::data_uri_bytes("data:image/png;base64,***"), None);
     }
 }

@@ -1195,7 +1195,18 @@
 			return node;
 		}
 		const button = el("button", { type: "button", class: "btn primary", title: "Copy for Word or Google Docs" }, [el("span", { class: "swap", text: "Copy APA figure" })]);
-		head.appendChild(el("div", { class: "actions" }, [button]));
+		// If pasting the whole figure loses the picture, the picture can go on its own
+		const picture = el("button", { type: "button", class: "btn quiet", title: "Only the picture, if pasting the figure leaves it out", text: "Copy picture only" });
+		picture.hidden = !tauri;
+		picture.addEventListener("click", function () {
+			const src = item.redrawn ? item.fig.src : item.fig.original;
+			tauri.core.invoke("copy_picture", { src: src }).then(function () {
+				toast("The picture of " + numberText + " is copied. Paste it under the figure's number and title.");
+			}, function (e) {
+				toast("Couldn't copy the picture: " + (e && e.message || e), true);
+			});
+		});
+		head.appendChild(el("div", { class: "actions" }, [picture, button]));
 		const why = item.fig.why || item.fig.error || "";
 		node.appendChild(el("p", { class: "figure-source" + (item.redrawn ? " redrawn" : ""), text: item.redrawn
 			? "Redrawn in APA style from your data, and checked against JASP's results."

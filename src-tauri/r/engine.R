@@ -49,8 +49,28 @@ runJasp <- function(o, ds) {
   res
 }
 # The plot as JASP draws it: names decoded everywhere (titles, legends, text in the plot), as a grid object
+# Raises every font size in a finished drawing to at least `smallest` (in the drawing's own points), in the APA
+# font; used for
+# patchworks, whose wrapped parts (survival risk tables) are grid drawings the plot theme never reaches
+floorFonts <- function(g, smallest) {
+  if (!is.null(g$gp) && is.numeric(g$gp$fontsize) && length(g$gp$fontsize) == 1 && g$gp$fontsize < smallest)
+    g$gp$fontsize <- smallest
+  if (!is.null(g$gp) && !is.null(g$gp$fontfamily) && !identical(g$gp$fontfamily, apaFamily))
+    g$gp$fontfamily <- apaFamily   # the APA font also in parts drawn outside ggplot
+  if (inherits(g, "text") && (is.null(g$gp) || is.null(g$gp$fontfamily)))
+    g$gp <- grid::gpar(fontfamily = apaFamily)
+  if (inherits(g, "gtable") && length(g$grobs)) g$grobs <- lapply(g$grobs, floorFonts, smallest = smallest)
+  if (inherits(g, "gTree") && length(g$children)) {
+    g <- grid::setChildren(g, do.call(grid::gList, unname(lapply(g$children, floorFonts, smallest = smallest))))
+  }
+  g
+}
 drawJasp <- function(p) {
   d <- jaspBase:::decodeplot(p)
+  if (inherits(d, "patchwork")) {
+    g <- tryCatch(floorFonts(patchwork::patchworkGrob(d), 8 / apaScaleK), error = function(e) NULL)
+    if (!is.null(g)) { grid::grid.newpage(); grid::grid.draw(g); return(invisible()) }
+  }
   if (inherits(d, "grob")) grid::grid.draw(d)
   else if (inherits(d, "qgraph")) plot(d)                     # networks and path diagrams: base graphics
   else if (inherits(d, "recordedplot")) grDevices::replayPlot(d)

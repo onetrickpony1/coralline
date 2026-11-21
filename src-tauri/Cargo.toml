@@ -32,7 +32,7 @@ tempfile = "3"
 
 tauri = { version = "2", features = ["image-png"], optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
-arboard = { version = "3", default-features = false, features = ["wayland-data-control"], optional = true }
+arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"], optional = true }  # image-data: "Copy picture only" for figures
 
 [target.'cfg(windows)'.dependencies]
 # The same version Tauri uses: the taskbar icon (WM_SETICON) and the Start menu shortcut's icon follow the theme

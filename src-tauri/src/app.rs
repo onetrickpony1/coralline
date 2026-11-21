@@ -32,6 +32,19 @@ async fn make_figures(path: String) -> Result<serde_json::Value, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Puts only a figure's picture on the clipboard, for when pasting the whole figure loses the picture
+#[tauri::command]
+fn copy_picture(src: String, state: State<Clipboard>) -> Result<(), String> {
+    let png = crate::figures::data_uri_bytes(&src).ok_or("the picture isn't a PNG data URI")?;
+    let image = tauri::image::Image::from_bytes(&png).map_err(|e| e.to_string())?;
+    let data = arboard::ImageData {
+        width: image.width() as usize,
+        height: image.height() as usize,
+        bytes: std::borrow::Cow::Owned(image.rgba().to_vec()),
+    };
+    with_clipboard(&state, |c| c.set_image(data))
+}
+
 #[tauri::command]
 fn initial_file(state: State<InitialFile>) -> Option<String> {
     state.0.lock().ok()?.take().map(|p| p.to_string_lossy().into_owned())
@@ -456,7 +469,7 @@ pub fn run(file: Option<PathBuf>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(Clipboard(Mutex::new(None)))
         .manage(InitialFile(Mutex::new(file)))
-        .invoke_handler(tauri::generate_handler![open_jasp, figures_available, make_figures, initial_file, copy_apa, copy_text, file_stamp, set_app_icon, open_link, app_info])
+        .invoke_handler(tauri::generate_handler![open_jasp, figures_available, make_figures, copy_picture, initial_file, copy_apa, copy_text, file_stamp, set_app_icon, open_link, app_info])
         .run(tauri::generate_context!())
         .expect("the app window couldn't start");
 }
