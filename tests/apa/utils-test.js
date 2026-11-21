@@ -1028,6 +1028,10 @@ function test_buildAPAFigure() {
 	t(dots.todo.indexOf("say what the y axis shows"), -1, "figure: a hidden axis needs no title");
 	var box = buildAPAFigure({ title: "sales", plotName: "boxPlot_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBoxplot", "GeomPoint"], x: "Total", y: "sales" }] }, variables: ["sales"] }, 1);
 	t(box.text.split("\n")[1] + " | " + (note(box).indexOf("Dots show individual scores.") !== -1), "Distribution of sales | true", "figure: an ungrouped box plot is a distribution, its dots explained");
+	var boxOut = buildAPAFigure({ title: "sales", plotName: "boxPlot_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomBoxplot", "GeomPoint"], x: "Total", y: "sales", boxOutliers: true }] }, variables: ["sales"] }, 1);
+	t((note(boxOut).indexOf("Dots show outliers, scores beyond the whiskers.") !== -1) + " | " + (note(boxOut).indexOf("individual scores") !== -1), "true | false", "figure: JASP's outlier dots in a box plot are named as outliers, not as every score");
+	var boxJit = buildAPAFigure({ title: "sales", plotName: "boxPlot_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBoxplot", "GeomPoint"], x: "Total", y: "sales", boxOutliers: false }] }, variables: ["sales"] }, 1);
+	t(note(boxJit).indexOf("Dots show individual scores.") !== -1, true, "figure: jittered dots in a box plot are the scores");
 	var densityTitle = buildAPAFigure({ title: "", plotName: "densityPlot_sales", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomRibbon"], x: "sales", y: "Density" }] }, variables: ["sales"] }, 1);
 	t(densityTitle.text.split("\n")[1], "Distribution of sales", "figure: variable names keep their spelling in suggested titles");
 	var two = buildAPAFigure({ title: "Correlation plot", plotName: "matrixPlot", analysisName: "Descriptives", options: { variables: { value: ["sales", "adverts"] } }, facts: { panels: 4, plots: [] }, variables: ["adverts", "sales"] }, 1);

@@ -207,13 +207,29 @@ plotFacts <- function(p) {
     lab <- function(x) {   # a title set on the scale wins over the plot's labels, as ggplot draws it
       sc <- tryCatch(g$scales$get_scales(x), error = function(e) NULL)
       v <- if (!is.null(sc) && !inherits(sc$name, "waiver") && !is.null(sc$name)) sc$name else g$labels[[x]]
+      if (is.expression(v) && length(v) == 1) v <- v[[1]]   # ggplot2 4 keeps some titles as expression(...)
       if (is.character(v)) v[1] else if (is.null(v)) NA_character_ else paste(deparse(v), collapse = "")
     }
+    # points in a box plot: outliers (every point beyond its box's whiskers, as JASP's Descriptives draws them in a
+    # layer of their own) or individual scores (jittered)
+    boxOutliers <- local({
+      box <- which(vapply(g$layers, function(l) inherits(l$geom, "GeomBoxplot"), FALSE))
+      pts <- which(vapply(g$layers, function(l) inherits(l$geom, "GeomPoint") && !inherits(l$position, "PositionJitter"), FALSE))
+      if (!length(box) || !length(pts) || max(c(box, pts)) > length(built)) return(FALSE)
+      b <- built[[box[1]]]
+      all(vapply(pts, function(j) {
+        d <- built[[j]]; if (!nrow(d) || is.null(d$x) || is.null(d$y)) return(FALSE)
+        all(vapply(seq_len(nrow(d)), function(k) {
+          r <- b[which.min(abs(b$x - d$x[k])), ]
+          isTRUE(d$y[k] < r$ymin - 1e-9 || d$y[k] > r$ymax + 1e-9)
+        }, FALSE))
+      }, FALSE))
+    })
     # an axis the plot hides (JASP's dot plots hide the count axis) needs no title
     th <- tryCatch(ggplot2:::plot_theme(g), error = function(e) NULL)
     hidden <- function(a) !is.null(th) && isTRUE(tryCatch(inherits(ggplot2::calc_element(paste0("axis.text.", a), th), "element_blank"), error = function(e) FALSE))
     list(geoms = unique(geoms), x = lab("x"), y = lab("y"), colour = lab("colour"), fill = lab("fill"), shape = lab("shape"),
-         linetype = lab("linetype"), text = unique(txt), xHidden = hidden("x"), yHidden = hidden("y"))
+         linetype = lab("linetype"), text = unique(txt), xHidden = hidden("x"), yHidden = hidden("y"), boxOutliers = boxOutliers)
   }
   if (inherits(p, "ggplot")) return(list(panels = 1L, plots = list(one(p))))
   if (inherits(p, "jaspGraphsPlot")) {

@@ -2642,8 +2642,13 @@ function _apaFigureIntervalNote(info) {
 		sentences.push(i18n("Boxes show the middle 50% of scores, with the median as a line; whiskers reach the most extreme scores within 1.5 times the box's length."));
 		if (geoms.some(function (g) { return /Violin|Density|Flat|Polygon/i.test(g); }))
 			sentences.push(i18n("The shaded shapes show the distribution of scores."));
-		if (geoms.some(function (g) { return /^Geom(Jasp)?Point$|Jitter/.test(g); }))
+		// JASP's Descriptives draws outliers as a point layer of their own: those dots aren't the scores
+		let boxPlots = (info.facts && info.facts.plots) || [];
+		let outliersOnly = boxPlots.length > 0 && boxPlots.every(function (p) { return ![].concat(p.geoms || []).some(function (g) { return /^Geom(Jasp)?Point$/.test(g); }) || p.boxOutliers === true; });
+		if (geoms.some(function (g) { return /Jitter/.test(g); }) || (!outliersOnly && geoms.some(function (g) { return /^Geom(Jasp)?Point$/.test(g); })))
 			sentences.push(i18n("Dots show individual scores."));
+		else if (outliersOnly && geoms.some(function (g) { return /^Geom(Jasp)?Point$/.test(g); }))
+			sentences.push(i18n("Dots show outliers, scores beyond the whiskers."));
 	}
 	// Lines that diagnostic and model plots draw, named from the plot (the same in JASP's own picture)
 	let plotName = info.plotName || "";
