@@ -10,6 +10,9 @@
 - **APA figures** (Linux, with JASP's Flatpak): the file's plots appear below the tables as APA figures, numbered apart from the tables, each with a copy button. A plot is redrawn in APA style from your data when its rerun in JASP's own R matches JASP's results; otherwise JASP's own picture goes inside the APA title and note. `coralline --figures FILE.jasp` prints the same as JSON. Text stays between 8 and 14 pt: a figure too wide for a portrait page keeps its size and asks for a landscape page, and busy correlation matrices grow until their panels are readable. A title that names no variable gets a suggested one from the plot's axes, marked for you to check. **Copy picture only** puts just the picture on the clipboard, for when pasting the whole figure leaves it out.
 
 ### Fixes
+- **Figures work with JASP 0.99.** Older files get the options JASP 0.99 added, renamed analyses and options are updated the way JASP does, each module runs with its own packages, and correlation plots no longer take minutes. Box plot outliers are called outliers, and PROCESS diagrams lose a stray legend.
+- **The menu scrolls** when the window is too short to show all of it.
+- **What changed explains the correlation table's missing last column**: it would only hold the dash for the variable against itself.
 - **On Windows the taskbar and Start menu icon follow the theme.** They stayed blue in dark mode, because Windows takes them from the big window icon and the shortcuts, which the app didn't change. A taskbar pin follows too.
 
 ## 0.1.0 - 2026-11-20

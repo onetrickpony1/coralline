@@ -27,7 +27,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/one
 **Which JASP version**
 
 - **Tables:** Coralline reads `.jasp` files saved by JASP 0.97 or newer. It's tested with files from JASP 0.97, 0.97.1, 0.98 and 0.98.1. Files from older versions may work but aren't tested. You don't need JASP installed to copy tables.
-- **Figures** (plots as APA figures): Linux only for now, with JASP 0.98.1 installed from [Flathub](https://flathub.org/apps/org.jaspstats.JASP). Coralline reruns your analyses in that JASP to redraw the plots. On Windows and Mac, and without JASP, you get the tables only.
+- **Figures** (plots as APA figures): Linux only for now, with JASP installed from [Flathub](https://flathub.org/apps/org.jaspstats.JASP). It's tested with JASP 0.98.1 and 0.99.0. Coralline reruns your analyses in that JASP to redraw the plots. On Windows and Mac, and without JASP, you get the tables only.
 
 ## Before you use it
 
