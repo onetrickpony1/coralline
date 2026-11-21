@@ -13,7 +13,60 @@ setDecoders <- function(map) {
   assign(".decodeColNamesLax", lax, envir = globalenv()); assign(".decodeColNamesStrict", strict, envir = globalenv())
   lax
 }
+# ggplot2 4 hashes each guide's title to tell guides apart. JASP's plots can give a function as the title (jaspBase's
+# column-name decoder), and in a rerun outside JASP, jaspTools' copy of jaspBase makes that function serialise to
+# hundreds of MB, so every guide took seconds (a correlation matrix: minutes). Hash functions by their code instead:
+# ggplot2 only compares the hashes, and the same code means the same title function.
+local({
+  imp <- parent.env(asNamespace("ggplot2"))
+  if (exists("hash", envir = imp, inherits = FALSE)) {
+    full <- get("hash", envir = imp)
+    light <- function(x) {
+      if (is.function(x)) return(c("<function>", deparse(x)))
+      if (is.list(x) && !is.object(x)) return(lapply(x, light))
+      x
+    }
+    unlockBinding("hash", imp)
+    assign("hash", function(x) full(light(x)), envir = imp)
+    lockBinding("hash", imp)
+  }
+})
+
+# Options the file doesn't have, because a newer JASP added them (JASP 0.99 added descriptivePlotHorizontalAxis to
+# linear regression, for example): JASP fills them from the analysis form's defaults when it opens an older file, so
+# the rerun does the same. The defaults come from the form (QML) of the installed module, through jaspTools; when
+# JASP bundles two versions of a module, the one whose version is installed is used. Saved options always win.
+moduleRoot <- Sys.getenv("JASP_MODULES", "/app/Modules/binary_pkgs")
+formDefaults <- function(name) {
+  forms <- list.files(moduleRoot, pattern = paste0("^", name, "\\.qml$"), recursive = TRUE, full.names = TRUE)
+  dirs <- unique(dirname(dirname(forms)))
+  installed <- function(d) {
+    desc <- tryCatch(read.dcf(file.path(d, "DESCRIPTION"), fields = c("Package", "Version")), error = function(e) NULL)
+    !is.null(desc) && isTRUE(tryCatch(as.character(packageVersion(desc[1, "Package"])) == desc[1, "Version"], error = function(e) FALSE))
+  }
+  dirs <- c(Filter(installed, dirs), Filter(Negate(installed), dirs))
+  for (d in dirs) {
+    old <- jaspTools:::getPkgOption("module.dirs")
+    jaspTools::setPkgOption("module.dirs", d)
+    defaults <- tryCatch(suppressMessages(jaspTools::analysisOptions(name)), error = function(e) NULL)
+    jaspTools::setPkgOption("module.dirs", old)
+    if (is.list(defaults)) return(defaults)
+  }
+  NULL
+}
+fillDefaults <- function(o) {
+  defaults <- tryCatch(suppressMessages(formDefaults(attr(o, "analysisName"))), error = function(e) NULL)
+  missing <- setdiff(names(defaults), c(names(o), ".meta"))
+  if (length(missing) == 0) return(o)
+  a <- attributes(o)
+  o[missing] <- defaults[missing]
+  for (k in setdiff(names(a), "names")) attr(o, k) <- a[[k]]
+  attr(o, "filledDefaults") <- missing
+  o
+}
+
 runJasp <- function(o, ds) {
+  o <- fillDefaults(o)
   name <- attr(o, "analysisName")
   enc <- if (ncol(ds) == 0) NULL else tryCatch(suppressWarnings(encodeOptionsAndDataset(o, ds)), error = function(e) NULL)
   map <- if (is.null(enc)) NULL else enc$encodingMap
