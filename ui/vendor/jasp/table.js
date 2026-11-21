@@ -1261,7 +1261,7 @@ function apaRenderTable(model) {
 
 function _apaCorrelationMatrix(table) {
 	// Correlation matrices number their variables in the rows ("1. sales"); APA repeats only the numbers as column
-	// headings and leaves out the last column when it holds nothing but the diagonal dash.
+	// headings. The last column, when it holds nothing but the diagonal dash, is left out by _apaCorrelationLastColumn.
 	let $table = $(table);
 	let numbers = {};
 	$table.children("tbody").children("tr").each(function () {
@@ -1287,8 +1287,17 @@ function _apaCorrelationMatrix(table) {
 	let firstHead = headRow.cells[0];
 	if (firstHead && firstHead.colSpan === 1 && _apaPlain(firstHead.innerHTML) === "")
 		firstHead.textContent = "Variable";
+	return true;
+}
 
-	// Drop the last column if it only holds dashes or nothing (no row or column spans reach into it)
+function _apaCorrelationLastColumn(table, remove) {
+	/**
+	 * The last column of a correlation matrix, when it only holds the diagonal dash (or nothing): APA's sample
+	 * correlation table leaves it out, as every correlation of the last variable is in its own row. Returns the
+	 * column's variable ({ number, name }) or null when the column holds more; removes it when `remove` is true.
+	 */
+	let $table = $(table);
+	let headRows = $table.children("thead").children("tr").length;
 	let rows = $table.children("thead, tbody").children("tr").toArray();
 	let layout = _apaGrid(rows);
 	let last = Math.max(0, ...layout.grid.map(function (row) { return row.length; })) - 1;
@@ -1296,9 +1305,19 @@ function _apaCorrelationMatrix(table) {
 	let onlyHead = lastCells.every(function (item) {
 		return item.colSpan === 1 && (item.row < $table.children("thead").children("tr").length || /^[\s\u2014\u2013-]*$/.test(_apaPlain(item.cell.innerHTML)));
 	});
-	if (onlyHead && lastCells.length > 0 && lastCells.some(function (item) { return item.row >= $table.children("thead").children("tr").length; }))
+	if (!onlyHead || lastCells.length === 0 || !lastCells.some(function (item) { return item.row >= headRows; }))
+		return null;
+	let headCell = lastCells.find(function (item) { return item.row === headRows - 1; });
+	let number = headCell ? _apaPlain(headCell.cell.innerHTML).trim() : "";
+	let name = "";
+	$table.children("tbody").children("tr").each(function () {
+		let match = this.cells[0] ? _apaPlain(this.cells[0].innerHTML).match(/^(\d+)\.\s+(.+)$/) : null;
+		if (match && match[1] === number)
+			name = match[2];
+	});
+	if (remove)
 		lastCells.forEach(function (item) { item.cell.remove(); });
-	return true;
+	return { number: number, name: name };
 }
 
 // Placeholders for what only the user can fill in: highlighted so they can't be missed in the document
@@ -2170,6 +2189,14 @@ function buildAPATable(tableElement, info, tableNumber) {
 	});
 	log.step(i18n("Statistic column"), i18n("A column naming the statistics in each row gets a heading."), function () { _apaStatisticColumn(table); });
 	let isCorrelationMatrix = log.step(i18n("Correlation matrix"), i18n("Variables numbered in the rows and named by number across the top, with dashes on the diagonal, as in APA's sample correlation table."), function () { return _apaCorrelationMatrix(table); });
+	let lastColumn = isCorrelationMatrix ? _apaCorrelationLastColumn(table, false) : null;
+	if (lastColumn) {
+		let which = lastColumn.number + (lastColumn.name ? " (" + lastColumn.name + ")" : "");
+		let own = lastColumn.name || i18n("that variable");
+		log.step(i18n("Last column left out"), i18n("Column") + " " + which + " " + i18n("is left out: it would only hold the dash for") + " " + own + " "
+			+ i18n("against itself, because the part above the diagonal stays empty. Nothing is lost: its correlations with every other variable are in row") + " " + lastColumn.number
+			+ ". " + i18n("APA's sample correlation table leaves this column out too."), function () { return _apaCorrelationLastColumn(table, true); });
+	}
 	let matrixOfCorrelations = isCorrelationMatrix && (/correlation/i.test(titleText) || /Pearson|Spearman|Kendall/.test(table.textContent));
 	let starsNote = isCorrelationMatrix ? log.step(i18n("Significance stars"), i18n("Stars on the correlations instead of a row of p values; the note explains them."), function () { return _apaCorrelationStars(table); }) : null;
 	let matrixN = isCorrelationMatrix ? log.step(i18n("Sample size rows"), i18n("Rows of n that are the same for every pair are removed; N goes in the note."), function () { return _apaCorrelationSampleRows(table); }) : null;

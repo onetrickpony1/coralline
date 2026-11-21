@@ -866,6 +866,8 @@ function test_buildAPATable() {
 	t(matrixLines[2], "Variable\tStatistic\t1", "apa text: matrix headings are the variable numbers, last column dropped, statistic column headed");
 	t(matrixLines[5], "2. Adverts\tPearson's r\t.58", "apa text: matrix r value, 2 decimals, no zero, name capitalised");
 	t(matrixLines[6], "\tLower 95% CI\t.40", "apa text: correlation CI loses the zero");
+	var dropped = (matrix.changes || []).find(function (c) { return c.rule === "Last column left out"; });
+	t(!!dropped && /Column 2 \(adverts\) is left out: it would only hold the dash for adverts against itself/.test(dropped.detail) && /its correlations with every other variable are in row 2\./.test(dropped.detail), true, "apa log: the dropped last column of a correlation matrix is named and explained");
 }
 
 function test_apaMixedDf() {
