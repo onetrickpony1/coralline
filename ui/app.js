@@ -680,6 +680,8 @@
 		if (/names/.test(text)) return "names";
 		if (/heading/.test(text)) return "heading";
 		if (/sample size/.test(text)) return "sample";
+		if (/split/.test(text)) return "split";
+		if (/figure smaller/.test(text)) return "smaller";
 		if (/landscape/.test(text)) return "landscape";
 		return "other";
 	}
@@ -709,8 +711,14 @@
 			p("Give the column a short heading that says what it holds, for example <i>Group</i>, <i>Condition</i> or <i>Measure</i>.");
 		else if (kind === "sample")
 			p("Write how many participants the table is based on, for example <i>N</i> = 120. If it differs between rows, give each one.");
-		else if (kind === "landscape")
-			p("Turn the page with this table sideways. Word: put a section break before and after the table, then Layout › Orientation › Landscape. Google Docs: select the table, then File › Page setup › Apply to: Selected content › Landscape.");
+		else if (kind === "landscape") {
+			const thing = /figure/.test(text) ? "figure" : "table";
+			p("Turn the page with this " + thing + " sideways. Word: put a section break before and after the " + thing + ", then Layout › Orientation › Landscape. Google Docs: select the " + thing + ", then File › Page setup › Apply to: Selected content › Landscape.");
+		}
+		else if (kind === "split")
+			p("The table is too wide even for a landscape page at 9 pt. Split it into two tables, for example with some of the columns in each. Give each table its own number and title.");
+		else if (kind === "smaller")
+			p("The figure is wider than a landscape page (9 in). Make it narrower in JASP (drag the plot's corner) and save, or shrink the picture after pasting. Its text shrinks with it, so keep the text at 8 pt or more.");
 		p("Then remove the yellow: in Word, Home › Text Highlight Colour › No Colour; in Google Docs, the highlighter › None.");
 		parts[parts.length - 1].className = "after";
 		return parts;
@@ -737,7 +745,13 @@
 	function tableNotes(item) {
 		const notes = [];
 		const size = /<table style="[^"]*font-size: (\d+)pt/.exec(item.apa.html);
-		if (size && +size[1] < 12)
+		const landscape = item.apa.todo.some(function (t) { return todoKind(t) === "landscape"; });
+		const split = item.apa.todo.some(function (t) { return todoKind(t) === "split"; });
+		if (split)
+			notes.push("Landscape page; type at " + (size ? size[1] : 9) + " pt, the smallest allowed. Still too wide, so split the table.");
+		else if (landscape)
+			notes.push("Landscape page; type at " + (size ? size[1] : 12) + " pt so the table fits." + (size && +size[1] < 12 ? " APA allows smaller type in tables." : ""));
+		else if (size && +size[1] < 12)
 			notes.push("Smaller type (" + size[1] + " pt) so the table fits the width of the page. APA allows smaller type in tables.");
 		// Extras: name the JASP tick box, and say the other numbers stay the same
 		const safe = " Your other numbers don't change, and this table updates by itself when you save in JASP.";
@@ -855,6 +869,8 @@
 
 	// Which to-do a highlighted spot belongs to, from where it sits in the table
 	function spotKind(spot) {
+		if (/split this table/.test(spot.textContent)) return "split";
+		if (/make this figure smaller/.test(spot.textContent)) return "smaller";
 		if (/Too wide/.test(spot.textContent)) return "landscape";
 		if (spot.closest("table"))
 			return /Add heading/i.test(spot.textContent) ? "heading" : "names";
@@ -1347,7 +1363,7 @@
 		const items = visibleItems().filter(function (i) { return i.apa && !i.left; });
 		if (items.length === 0)
 			return;
-		const html = items.map(function (i) { return i.apa.html; }).join("<p>&nbsp;</p>");
+		const html = items.map(function (i) { return i.apa.html; }).join('<p style="' + apaTextStyle + '; margin: 0pt;">&nbsp;</p>');  // a blank line in the copy's font
 		const text = items.map(function (i) { return i.apa.text; }).join("\n\n");
 		copyRaw(asText ? null : apaClipboardHTML(html), text).then(function () {
 			items.forEach(markCopied);

@@ -1029,25 +1029,31 @@ function _apaSentence(text) {
 }
 
 var apaCellPadding	= 4;	// pt, left and right
-var apaPageTextWidth = 451;	// pt, text width of an A4 page with 1-inch margins (Letter: 468)
-var apaPageWidth	= 440;	// pt, a little under the text width of an A4 or Letter page with 1-inch margins (about 451)
+// Page text widths with 1 in margins. Portrait uses A4 (6.27 in), the narrower of A4 and Letter (6.5 in, 468 pt),
+// so a table that fits A4 fits Letter too. Landscape uses Letter (9 in), the narrower of Letter and A4 (9.69 in).
+var apaPageTextWidth		= 451;	// pt, portrait
+var apaLandscapeTextWidth	= 648;	// pt, landscape (APA 7, 2.22)
+// Pasted margins always carry a unit ("0pt", not "0"): LibreOffice reads "margin: 6pt 0 0 0" as 6 pt on every side.
+// Tables are fitted a little under the text width, as a margin for word processors and font versions
+var apaPageWidth			= apaPageTextWidth - 11;		// pt, 440
+var apaLandscapePageWidth	= apaLandscapeTextWidth - 11;	// pt, 637
+// Pasted text is Times New Roman. Each paragraph and cell names it inline, as Google Docs drops styles from some wrappers.
+var apaFont			= "font-family: 'Times New Roman', Times, serif";
+var apaTextStyle	= apaFont + "; font-size: 12pt; font-weight: normal; font-style: normal";
 
 var _apaCanvas = null;
 function _apaTextWidth(text) {
-	// Width in pt of the text at the table's 12 pt in the common paper fonts (Arial, Google Docs' default, and Times New Roman),
-	// whichever is wider. Falls back to an estimate when no canvas is available.
+	// Width in pt of the text at 12 pt in Times New Roman, the font of the pasted table, plus 3% for differences
+	// between versions of the font. Falls back to an estimate when no canvas is available.
 	if (!text)
 		return 0;
 	try {
 		_apaCanvas = _apaCanvas || document.createElement("canvas");
 		let ctx = _apaCanvas.getContext("2d");
-		let widest = 0;
-		for (let font of ["12pt Arial, Helvetica, sans-serif", "12pt 'Times New Roman', Times, serif"]) {
-			ctx.font = font;
-			widest = Math.max(widest, ctx.measureText(text).width * 0.75);  // px to pt
-		}
-		if (widest > 0)
-			return widest;
+		ctx.font = "12pt 'Times New Roman', Times, serif";
+		let width = ctx.measureText(text).width * 0.75;  // px to pt
+		if (width > 0)
+			return width * 1.03;
 	} catch (e) { }
 	return text.length * 6.5;
 }
@@ -1055,32 +1061,44 @@ function _apaTextWidth(text) {
 function _apaColumnWidths(bodyWidth, headWidth) {
 	// Each column fits its widest number or label and its widest heading word (measured at 12 pt).
 	// Google Docs ignores pasted column widths: it sizes each column to its longest unbreakable text and, when the
-	// total is wider than the page, shrinks every column until numbers break. So a table too wide for the page at
-	// 12 pt steps down to 11, 10 or 9 pt type (APA allows smaller type in tables) until it fits. Word uses the
-	// widths given here; if the table is still too wide, long heading words give up their room first.
-	let extra = 2 * apaCellPadding + 8;  // padding plus room for font differences
+	// total is wider than the page, shrinks every column until numbers break. So a table too wide for a portrait
+	// page at 12 pt steps down to 11, 10 or 9 pt type (APA allows smaller type in tables) until it fits. A table that
+	// doesn't fit at 9 pt goes on a landscape page: its type is the largest size from 9 to 12 pt that fits there.
+	// A table too wide even for a landscape page keeps 9 pt. Word uses the widths given here; if the table is still
+	// too wide, long heading words give up their room first.
+	// Returns { widths, fontSize, landscape, tooWideForLandscape }.
 	let sum = function (list) { return list.reduce(function (a, b) { return a + b; }, 0); };
 	let natural = bodyWidth.map(function (body, c) { return Math.max(body, headWidth[c]); });
-	let fontSize = 12;
-	for (let size of [12, 11, 10, 9]) {
-		fontSize = size;
-		if (sum(natural) * size / 12 + (2 * apaCellPadding + 3) * natural.length <= apaPageWidth)  // Docs adds only the padding
-			break;
-	}
-	let scale = fontSize / 12;
-	// Spare room per column shrinks (down to the padding) before a table runs past the page
-	let room = (apaPageWidth - sum(natural) * scale) / natural.length;
-	extra = Math.max(2 * apaCellPadding + 3, Math.min(extra, room));
-	let widths = natural.map(function (w) { return w * scale + extra; });
-	let total = sum(widths);
-	if (total > apaPageWidth) {
-		let slack = bodyWidth.map(function (body, c) { return Math.max(0, (headWidth[c] - Math.max(body, 24)) * scale); });
-		let slackTotal = sum(slack);
-		let cut = Math.min(total - apaPageWidth, slackTotal);
-		if (slackTotal > 0)
-			widths = widths.map(function (w, c) { return w - cut * slack[c] / slackTotal; });
-	}
-	return { widths: widths.map(function (w) { return Math.ceil(w); }), fontSize: fontSize };
+	// Column widths at one type size, for one page (the fitted width, a little under the text width)
+	let layout = function (fontSize, page) {
+		let scale = fontSize / 12;
+		// Spare room per column (padding plus room for font differences) shrinks, down to the padding, before a table runs past the page
+		let room = (page - sum(natural) * scale) / natural.length;
+		let extra = Math.max(2 * apaCellPadding + 3, Math.min(2 * apaCellPadding + 8, room));
+		let widths = natural.map(function (w) { return w * scale + extra; });
+		let total = sum(widths);
+		if (total > page) {
+			let slack = bodyWidth.map(function (body, c) { return Math.max(0, (headWidth[c] - Math.max(body, 24)) * scale); });
+			let slackTotal = sum(slack);
+			let cut = Math.min(total - page, slackTotal);
+			if (slackTotal > 0)
+				widths = widths.map(function (w, c) { return w - cut * slack[c] / slackTotal; });
+		}
+		return widths.map(function (w) { return Math.ceil(w); });
+	};
+	// A size fits when Docs's columns (text plus padding) fit the page and the rounded widths fit the text width
+	let fits = function (size, page, textWidth) {
+		return sum(natural) * size / 12 + (2 * apaCellPadding + 3) * natural.length <= page  // Docs adds only the padding
+			&& sum(layout(size, page)) <= textWidth;
+	};
+	let sizes = [12, 11, 10, 9];
+	let fontSize = sizes.find(function (size) { return fits(size, apaPageWidth, apaPageTextWidth); });
+	if (fontSize !== undefined)
+		return { widths: layout(fontSize, apaPageWidth), fontSize: fontSize, landscape: false, tooWideForLandscape: false };
+	fontSize = sizes.find(function (size) { return fits(size, apaLandscapePageWidth, apaLandscapeTextWidth); });
+	if (fontSize !== undefined)
+		return { widths: layout(fontSize, apaLandscapePageWidth), fontSize: fontSize, landscape: true, tooWideForLandscape: false };
+	return { widths: layout(9, apaLandscapePageWidth), fontSize: 9, landscape: true, tooWideForLandscape: true };
 }
 
 function _apaNotes(footnotes) {
@@ -2433,7 +2451,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 		let isHead = item.row < headRows.length;
 		// Every border and background is set explicitly: the clipboard wrapper (wrapHTML) carries JASP's
 		// own table stylesheet, with row shading and a line under every heading cell
-		let style = ["font-size: " + sizing.fontSize + "pt", "padding: 2pt " + apaCellPadding + "pt", "font-weight: normal", "font-style: normal", "background: transparent",
+		let style = [apaFont, "font-size: " + sizing.fontSize + "pt", "padding: 2pt " + apaCellPadding + "pt", "font-weight: normal", "font-style: normal", "background: transparent",
 			"border-left: none", "border-right: none", "vertical-align: " + (isHead ? "bottom" : "top")];
 		let top = "none";
 		let bottom = "none";
@@ -2461,7 +2479,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 	}
 	table.removeAttribute("class");
 	let tableWidth = columnWidths.reduce(function (a, b) { return a + b; }, 0);
-	table.setAttribute("style", "border-collapse: collapse; font-size: " + sizing.fontSize + "pt; margin: 0; width: " + tableWidth + "pt;");
+	table.setAttribute("style", "border-collapse: collapse; " + apaFont + "; font-size: " + sizing.fontSize + "pt; margin: 0pt; width: " + tableWidth + "pt;");
 	table.setAttribute("width", Math.round(tableWidth * 4 / 3));
 	let colgroup = document.createElement("colgroup");
 	for (let width of columnWidths) {
@@ -2549,18 +2567,28 @@ function buildAPATable(tableElement, info, tableNumber) {
 		todo.push(i18n("make the title describe the variables"));
 	}
 	log.add(i18n("Title"), i18n("Title in title case and italics. APA wants it to describe the variables, so a title that doesn't gets a highlighted reminder (APA 7, 7.11)."), [{ from: _apaEscape(_apaPlain(info.title)), to: titleHtml }]);
-	let tooWide = columnWidths.reduce(function (a, b) { return a + b; }, 0) > apaPageTextWidth;
-	if (tooWide)
-		log.add(i18n("Page width"), i18n("The table is wider than a portrait page, so a reminder asks for a landscape page."));
+	// Page width: the type size and page chosen by _apaColumnWidths
+	let tooWide = sizing.landscape;
+	let tooWideForLandscape = sizing.tooWideForLandscape;
+	if (tooWideForLandscape)
+		log.add(i18n("Page width"), i18n("The table is too wide for a portrait page and for a landscape page, even at 9 pt, so its type stays at 9 pt. Reminders ask for a landscape page and suggest splitting the table."));
+	else if (tooWide)
+		log.add(i18n("Page width"), i18n("The table is too wide for a portrait page, even at 9 pt, so a reminder asks for a landscape page. Its type is %1 pt, the largest size from 9 to 12 pt that fits a landscape page.").replace("%1", sizing.fontSize));
+	else if (sizing.fontSize < 12)
+		log.add(i18n("Page width"), i18n("The table is too wide for a portrait page at 12 pt, so its type is %1 pt, the largest size that fits. Tables go no smaller than 9 pt.").replace("%1", sizing.fontSize));
 	if (tooWide)
 		todo.push(i18n("put the table on a landscape page, it is too wide for a portrait page"));
+	if (tooWideForLandscape)
+		todo.push(i18n("split the table in two, it is too wide even for a landscape page"));
 
 	// HTML version
-	let html = '<div style="font-size: 12pt; font-weight: normal; font-style: normal;">';
-	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><b>' + _apaEscape(i18n("Table")) + " " + tableNumber + "</b></p>";
-	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><i>' + titleHtml + "</i></p>";
+	let html = '<div style="' + apaTextStyle + ';">';
+	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><b>' + _apaEscape(i18n("Table")) + " " + tableNumber + "</b></p>";
+	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><i>' + titleHtml + "</i></p>";
 	if (tooWide)
-		html += '<p style="margin: 0 0 6pt 0; font-weight: normal;">' + _apaTodo(i18n("Too wide for a portrait page: put this table on a landscape page")) + "</p>";
+		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide for a portrait page: put this table on a landscape page")) + "</p>";
+	if (tooWideForLandscape)
+		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide even for a landscape page: split this table in two")) + "</p>";
 	html += table.outerHTML;  // APA uses a true minus sign (−.10); the plain text below keeps hyphens for spreadsheets
 	if (notes.general.length > 0 || notes.specific.length > 0) {
 		let parts = [];
@@ -2568,7 +2596,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 			parts.push('<i>' + _apaEscape(noteLabel) + '</i> ' + notes.general.join(" "));
 		for (let note of notes.specific)
 			parts.push(note.symbol ? note.symbol + " " + note.text : note.text);
-		html += '<p style="margin: 6pt 0 0 0; font-weight: normal;">' + parts.join("<br>") + "</p>";
+		html += '<p style="margin: 6pt 0pt 0pt 0pt; ' + apaTextStyle + ';">' + parts.join("<br>") + "</p>";
 	}
 	html += "</div>";
 	html = html.replace(/ data-apa-todo="1"/g, "");
@@ -2697,8 +2725,9 @@ function _apaFigureIntervalNote(info) {
 	return sentences.length > 0 ? joined() : null;
 }
 
-// The text width of a portrait page with 1 in margins (US Letter; A4 is 6.27 in)
-const apaFigurePortraitWidth = 6.5;
+// Figures use the tables' page widths, in inches: A4 portrait (6.27 in) and Letter landscape (9 in)
+const apaFigurePortraitWidth	= apaPageTextWidth / 72;
+const apaFigureLandscapeWidth	= apaLandscapeTextWidth / 72;
 
 function _apaSuggestFigureTitle(facts) {
 	/**
@@ -2876,23 +2905,31 @@ function buildAPAFigure(info, figureNumber) {
 	let px = function (inches) { return Math.round(inches * 96); };
 	let img = '<img src="' + _apaEscape(image.src || "") + '" width="' + px(w) + '" height="' + px(h) + '" style="width: ' + w.toFixed(2) + 'in; height: ' + h.toFixed(2) + 'in;" alt="' + _apaEscape(title) + '">';
 
-	// Wider than a portrait page's text (6.5 in): the figure keeps its size, so its text stays readable, and a
-	// reminder asks for a landscape page, as for tables
-	let tooWide = w > apaFigurePortraitWidth + 0.01 || image.landscape === true;
-	if (tooWide) {
+	// Wider than a portrait page's text (6.27 in): the figure keeps its size, so its text stays readable, and a
+	// reminder asks for a landscape page, as for tables. Wider than a landscape page's text (9 in): a reminder
+	// asks for a smaller figure too.
+	let tooWideForLandscape = w > apaFigureLandscapeWidth + 0.01;
+	let tooWide = w > apaFigurePortraitWidth + 0.01 || image.landscape === true || tooWideForLandscape;
+	if (tooWideForLandscape)
+		log.add(i18n("Page width"), i18n("The figure is wider than a landscape page, so reminders ask for a landscape page and a smaller figure."));
+	else if (tooWide)
 		log.add(i18n("Page width"), i18n("The figure is wider than a portrait page, so a reminder asks for a landscape page instead of shrinking its text below 8 pt."));
+	if (tooWide)
 		todo.push(i18n("put the figure on a landscape page, it is too wide for a portrait page"));
-	}
+	if (tooWideForLandscape)
+		todo.push(i18n("make the figure smaller, it is too wide even for a landscape page"));
 
 	let noteLabel = i18n("Note.");
-	let html = '<div style="font-size: 12pt; font-weight: normal; font-style: normal;">';
-	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><b>' + _apaEscape(i18n("Figure")) + " " + figureNumber + "</b></p>";
-	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><i>' + titleHtml + "</i></p>";
+	let html = '<div style="' + apaTextStyle + ';">';
+	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><b>' + _apaEscape(i18n("Figure")) + " " + figureNumber + "</b></p>";
+	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><i>' + titleHtml + "</i></p>";
 	if (tooWide)
-		html += '<p style="margin: 0 0 6pt 0; font-weight: normal;">' + _apaTodo(i18n("Too wide for a portrait page: put this figure on a landscape page")) + "</p>";
-	html += '<p style="margin: 0 0 6pt 0;">' + img + "</p>";
+		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide for a portrait page: put this figure on a landscape page")) + "</p>";
+	if (tooWideForLandscape)
+		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide even for a landscape page: make this figure smaller")) + "</p>";
+	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + img + "</p>";
 	if (notes.length > 0)
-		html += '<p style="margin: 6pt 0 0 0; font-weight: normal;"><i>' + _apaEscape(noteLabel) + "</i> " + notes.join(" ") + "</p>";
+		html += '<p style="margin: 6pt 0pt 0pt 0pt; ' + apaTextStyle + ';"><i>' + _apaEscape(noteLabel) + "</i> " + notes.join(" ") + "</p>";
 	html += "</div>";
 	html = html.replace(/ data-apa-todo="1"/g, "");
 

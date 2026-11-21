@@ -441,6 +441,14 @@ function _apaRender(attrs) {
 
 function _apaHasNot(haystack, needle) { return haystack.indexOf(needle) === -1; }
 
+// True when every value in every margin of the copy has a unit (0pt, not 0)
+function _apaMarginsHaveUnits(html) {
+	var margins = html.match(/margin:[^;"]*/g) || [];
+	return margins.length > 0 && margins.every(function (m) {
+		return m.replace(/^margin:\s*/, "").trim().split(/\s+/).every(function (v) { return /^\d+(\.\d+)?pt$/.test(v); });
+	});
+}
+
 function test_buildAPATable() {
 	_reset();
 	var t = _assertEq;
@@ -478,6 +486,66 @@ function test_buildAPATable() {
 	t(wide.fontSize < 12 && wide.widths.reduce(function (a, b) { return a + b; }, 0) <= apaPageWidth + wide.widths.length, true, "apa: a wide table steps down its type to fit the page");
 	var longHeads = _apaColumnWidths([40, 40, 40, 40, 40, 40, 40, 40, 40], [100, 100, 100, 40, 40, 40, 40, 40, 40]);
 	t(longHeads.fontSize < 12, true, "apa: long unbreakable heading words count towards the page width");
+
+	// Type size and page: 12 down to 9 pt on a portrait page, then the largest size from 9 to 12 pt on a landscape page.
+	// Every text is measured as the same width, so the sizes don't depend on the fonts installed.
+	var sumOf = function (list) { return list.reduce(function (a, b) { return a + b; }, 0); };
+	var sizeOf = function (each) { var w = Array(6).fill(each); return _apaColumnWidths(w, w); };
+	var fit12 = sizeOf(40), fit10 = sizeOf(72), land12 = sizeOf(90), land11 = sizeOf(100), land9 = sizeOf(120), tooWide = sizeOf(150);
+	t([fit12.fontSize, fit12.landscape, fit12.tooWideForLandscape].join(), "12,false,false", "apa page: a narrow table is 12 pt on a portrait page");
+	t([fit10.fontSize, fit10.landscape, fit10.tooWideForLandscape].join(), "10,false,false", "apa page: a wider table steps down to 10 pt on a portrait page");
+	t(sumOf(fit10.widths) <= apaPageTextWidth, true, "apa page: the 10 pt table fits the portrait text width");
+	t([land12.fontSize, land12.landscape, land12.tooWideForLandscape].join(), "12,true,false", "apa page: too wide for portrait at 9 pt, landscape at 12 pt");
+	t(sumOf(land12.widths) > apaPageTextWidth && sumOf(land12.widths) <= apaLandscapeTextWidth, true, "apa page: the landscape table is sized for the landscape text width");
+	t([land11.fontSize, land11.landscape, land11.tooWideForLandscape].join(), "11,true,false", "apa page: landscape at 11 pt, the largest size that fits");
+	t([land9.fontSize, land9.landscape, land9.tooWideForLandscape].join(), "9,true,false", "apa page: landscape at 9 pt");
+	t(sumOf(land9.widths) <= apaLandscapeTextWidth, true, "apa page: the 9 pt landscape table fits the landscape text width");
+	t([tooWide.fontSize, tooWide.landscape, tooWide.tooWideForLandscape].join(), "9,true,true", "apa page: too wide even for landscape keeps 9 pt");
+	// 19 narrow columns: Docs's columns fit portrait at 12 pt, but each width rounds up to 24 pt, 456 pt in all,
+	// past the 451 pt text width at every size. So the table goes landscape, sized again for that page.
+	var rounded = _apaColumnWidths(Array(19).fill(9.5), Array(19).fill(0));
+	t([rounded.fontSize, rounded.landscape, rounded.tooWideForLandscape].join(), "12,true,false", "apa page: rounding past the portrait width goes landscape at the largest size that fits");
+	t(sumOf(rounded.widths) > 456 && sumOf(rounded.widths) <= apaLandscapeTextWidth, true, "apa page: after rounding, the widths are worked out again for the landscape page");
+
+	// The same through the whole builder: type size, reminders and the change log
+	var realTextWidth = _apaTextWidth;
+	var buildEach = function (each) {
+		_apaTextWidth = function (text) { return text ? each : 0; };
+		try {
+			var fields = [{ name: "v", title: "Variable", type: "string" }];
+			var row = { v: "Score" };
+			for (var c = 1; c < 6; c++) {
+				fields.push({ name: "c" + c, title: "M" + c, type: "number", format: "dp:2" });
+				row["c" + c] = 1.5;
+			}
+			return _apaRender({ title: "Descriptives - Score", schema: { fields: fields }, data: [row], footnotes: [] });
+		} finally {
+			_apaTextWidth = realTextWidth;
+		}
+	};
+	var pageLog = function (apa) { var c = apa.changes.filter(function (c) { return c.rule === "Page width"; })[0]; return c ? c.detail : ""; };
+	var tableSize = function (apa) { var m = /<table style="[^"]*font-size: (\d+)pt/.exec(apa.html); return m ? +m[1] : 0; };
+	var portraitTodo = "put the table on a landscape page, it is too wide for a portrait page";
+	var splitTodo = "split the table in two, it is too wide even for a landscape page";
+	var b12 = buildEach(40), b10 = buildEach(72), bLand11 = buildEach(100), bLand9 = buildEach(120), bTooWide = buildEach(150);
+	t(tableSize(b12) === 12 && b12.todo.indexOf(portraitTodo) === -1 && pageLog(b12) === "", true, "apa build: narrow table, 12 pt, portrait, no page reminder");
+	t(tableSize(b10) === 10 && b10.todo.indexOf(portraitTodo) === -1 && /type is 10 pt/.test(pageLog(b10)), true, "apa build: 10 pt on a portrait page, the log says why");
+	t((b10.html.match(/<t[dh] [^>]*>/g) || []).every(function (tag) { return /font-size: 10pt/.test(tag); }), true, "apa build: every cell gets the smaller size");
+	t(tableSize(bLand11) === 11 && bLand11.todo.indexOf(portraitTodo) !== -1 && bLand11.todo.indexOf(splitTodo) === -1, true, "apa build: landscape at 11 pt, with the landscape reminder");
+	t(/fits a landscape page/.test(pageLog(bLand11)) && /type is 11 pt/.test(pageLog(bLand11)), true, "apa build: the log gives the landscape size and why");
+	t(bLand11.html.indexOf("put this table on a landscape page") !== -1 && bLand11.html.indexOf("split this table") === -1, true, "apa build: landscape reminder above the table");
+	t(+(/<table style="[^"]*width: (\d+)pt/.exec(bLand11.html) || [])[1] <= apaLandscapeTextWidth, true, "apa build: the landscape table width fits a landscape page");
+	t(tableSize(bLand9) === 9 && bLand9.todo.indexOf(portraitTodo) !== -1 && bLand9.todo.indexOf(splitTodo) === -1, true, "apa build: landscape at 9 pt");
+	t(tableSize(bTooWide) === 9 && bTooWide.todo.indexOf(portraitTodo) !== -1 && bTooWide.todo.indexOf(splitTodo) !== -1, true, "apa build: too wide even for landscape: 9 pt, landscape and split reminders");
+	t(bTooWide.html.indexOf("Too wide even for a landscape page: split this table in two") !== -1 && /stays at 9 pt/.test(pageLog(bTooWide)), true, "apa build: split reminder in the copy and the log");
+
+	// Times New Roman on every cell and paragraph, inline, as Google Docs drops styles from some wrappers
+	var times = "font-family: 'Times New Roman', Times, serif";
+	t((b12.html.match(/<t[dh] [^>]*>/g) || []).every(function (tag) { return tag.indexOf(times) !== -1; }), true, "apa font: every cell names Times New Roman");
+	t((b12.html.match(/<(p|div|table) [^>]*>/g) || []).every(function (tag) { return tag.indexOf(times) !== -1; }), true, "apa font: the number, title, note and table name Times New Roman");
+	t((b12.html.match(/<p [^>]*>/g) || []).every(function (tag) { return /font-size: 12pt/.test(tag); }), true, "apa font: number, title and note are 12 pt");
+	// Margins carry units: LibreOffice reads the unitless zeros in "margin: 6pt 0 0 0" as 6 pt
+	t(_apaMarginsHaveUnits(b12.html) && _apaMarginsHaveUnits(bTooWide.html) && /margin: 6pt 0pt 0pt 0pt/.test(b12.html) && /margin: 0pt;/.test(b12.html), true, "apa margins: every margin value has a unit");
 	t(lines[0], "Table 3", "apa text: number line");
 	t(lines[1], "Independent Samples t Test [describe what was measured]", "apa text: title line with placeholder");
 	t(lines[2], "[Add heading]\tt\tdf\tp\tCohen's d", "apa text: heading row, placeholder when the variables are unknown");
@@ -986,8 +1054,20 @@ function test_buildAPAFigure() {
 	var wide = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 8.4, heightIn: 6 } }, 1);
 	t(wide.html.indexOf("put this figure on a landscape page") !== -1 && wide.todo.length === 1, true, "figure: too wide for portrait asks for landscape");
 	t(wide.html.indexOf("width: 8.40in") !== -1, true, "figure: a wide figure keeps its size");
-	var narrow = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 6.5, heightIn: 4 } }, 1);
-	t(narrow.html.indexOf("landscape") === -1, true, "figure: a page-wide figure fits portrait");
+	var narrow = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 6.27, heightIn: 4 } }, 1);
+	t(narrow.html.indexOf("landscape") === -1, true, "figure: a figure as wide as an A4 page's text fits portrait");
+	var letterWide = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 6.4, heightIn: 4 } }, 1);
+	t(letterWide.todo.indexOf("put the figure on a landscape page, it is too wide for a portrait page") !== -1, true, "figure: 6.4 in is too wide for A4 portrait, so it asks for landscape");
+	var nineIn = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 9, heightIn: 6 } }, 1);
+	t(nineIn.todo.join("|"), "put the figure on a landscape page, it is too wide for a portrait page", "figure: a 9 in figure fits a landscape page, no request to make it smaller");
+	var huge = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 9.6, heightIn: 6 } }, 1);
+	t(huge.todo.indexOf("put the figure on a landscape page, it is too wide for a portrait page") !== -1 && huge.todo.indexOf("make the figure smaller, it is too wide even for a landscape page") !== -1, true, "figure: wider than a landscape page asks for landscape and a smaller figure");
+	t(huge.html.indexOf("Too wide even for a landscape page: make this figure smaller") !== -1 && huge.html.indexOf("width: 9.60in") !== -1, true, "figure: smaller-figure reminder in the copy, the figure keeps its size");
+	t(huge.changes.some(function (c) { return c.rule === "Page width" && /wider than a landscape page/.test(c.detail); }), true, "figure: the log says it is wider than a landscape page");
+	t(Math.abs(apaFigurePortraitWidth * 72 - apaPageTextWidth) < 0.001 && apaFigureLandscapeWidth === 9, true, "figure: page widths come from the table constants (A4 portrait, 9 in landscape)");
+	t(_apaMarginsHaveUnits(huge.html) && _apaMarginsHaveUnits(ci.html) && /margin: 6pt 0pt 0pt 0pt/.test(ci.html), true, "figure margins: every margin value has a unit");
+	var figureTimes = "font-family: 'Times New Roman', Times, serif";
+	t((wide.html.match(/<(p|div) [^>]*>/g) || []).every(function (tag) { return tag.indexOf(figureTimes) !== -1 && /font-size: 12pt/.test(tag); }), true, "figure font: number, title, picture and note paragraphs name Times New Roman 12 pt");
 
 	// Notes checked against APA 7 for the plots of t tests, descriptives, ANOVA and regression
 	var note = function (f) { return f.text.split("\n").slice(3).join(" "); };
