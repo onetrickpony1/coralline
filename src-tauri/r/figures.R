@@ -29,7 +29,7 @@ suppressMessages({ setPkgOption("module.dirs", file.path(libs, basename(libs)));
 oldwd <- setwd(here); source("readjasp.R"); source("apastyle.R"); setwd(oldwd)
 source(file.path(here, "engine.R"))   # what JASP's engine provides: globals, name encoding, decoding, drawing
 
-pt <- 10; maxw <- 6.5; maxh <- 8; dpi <- 300; k <- 5 / (530 / 72)   # one scale: a 530 px JASP plot becomes 5 in, its text 10 pt
+pt <- 10; portraitw <- 6.5; landscapew <- 9; portraith <- 8; landscapeh <- 6.5; dpi <- 300; k <- 5 / (530 / 72)   # one scale: a 530 px JASP plot becomes 5 in, its text 10 pt
 jaspGraphs::graphOptions(fontsize = pt / k, family = apaFamily, axis.title.cex = 1.1, legend.cex = 1)
 opts <- tryCatch(analysisOptions(jaspFile), error = function(e) list())   # a file without analyses
 if (!is.null(attr(opts, "analysisName"))) opts <- list(opts)
@@ -47,14 +47,23 @@ for (i in seq_along(opts)) {
   for (fig in res$state$figures) {
     size <- function(v, fallback) if (is.numeric(v) && length(v) == 1 && is.finite(v) && v > 0) v else fallback
     w <- size(fig$width, 480) / 72; h <- size(fig$height, 320) / 72   # JASP's default size when a plot has none
-    if (w * k > maxw) { h <- h * maxw / (w * k); w <- maxw / k }   # too wide for the page: drawn smaller, same text size
+    # Busy plots of many panels (correlation matrices) grow until each panel is about 1.5 in wide, so their 8 to
+    # 10 pt text fits; a plot wider than a portrait page (6.5 in) keeps its width up to a landscape page's (9 in),
+    # and the figure asks for a landscape page. Only beyond that is a plot drawn smaller than JASP's size.
+    cols <- if (inherits(fig$obj, "jaspGraphsPlot") && dataPanels(fig$obj) >= 4) ceiling(sqrt(length(fig$obj$subplots))) else 1
+    if (cols > 1 && w * k < min(cols * 1.5, landscapew)) { f <- min(cols * 1.5, landscapew) / (w * k); w <- w * f; h <- h * f }
+    if (w * k > landscapew) { h <- h * landscapew / (w * k); w <- landscapew / k }
+    landscape <- w * k > portraitw + 0.01
+    maxh <- if (landscape) landscapeh else portraith
     if (h * k > maxh) { w <- w * maxh / (h * k); h <- maxh / k }   # too tall for a page with its title and note
+    landscape <- w * k > portraitw + 0.01
+    apaPanelIn <- w * k / cols   # read by thinBreaks (apastyle.R)
     png <- sprintf("a%d-%d-%s.png", i, length(figures) + 1, substr(gsub("[^A-Za-z0-9_.-]", "_", fig$getUnique), 1, 80))
     q <- NULL
     drawn <- if (is.null(fig$obj)) {
       "JASP couldn't draw this plot either"
-    } else if (inherits(fig$obj, "jaspGraphsPlot") && dataPanels(fig$obj) > 15) {
-      "too many panels to fit a page with readable text"   # big correlation matrices: JASP's own picture is better
+    } else if (cols > 8) {
+      "too many panels to fit even a landscape page with readable text"   # JASP's own picture is better
     } else tryCatch({
       q <- apaPlot(fig$obj)
       ragg::agg_png(file.path(outDir, png), width = w, height = h, units = "in", res = dpi * k); drawJasp(q); dev.off()
@@ -64,7 +73,7 @@ for (i in seq_along(opts)) {
     }, error = function(e) { while (dev.cur() > 1) dev.off(); conditionMessage(e) })
     # names decoded for the caller (titles, facts), but the picture's file name stays as written
     entry <- rapply(list(analysis = i, name = fig$getUnique, title = fig$title, error = if (isTRUE(drawn)) NULL else drawn,
-      widthIn = w * k, heightIn = h * k, facts = tryCatch(plotFacts(fig$obj), error = function(e) NULL), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
+      widthIn = w * k, heightIn = h * k, landscape = landscape, facts = tryCatch(plotFacts(fig$obj), error = function(e) NULL), changes = if (is.null(q)) NULL else attr(q, "apaChanges")),
       decode, classes = "character", how = "replace")
     entry$png <- if (isTRUE(drawn)) png else NULL
     figures[[length(figures) + 1]] <- entry

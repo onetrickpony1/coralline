@@ -1153,7 +1153,7 @@
 			title: fig.title || "",
 			containerTitles: fig.containerTitles || [],
 			image: redrawn
-				? { src: fig.src, widthIn: fig.widthIn, heightIn: fig.heightIn }
+				? { src: fig.src, widthIn: fig.widthIn, heightIn: fig.heightIn, landscape: fig.landscape === true }
 				: { src: fig.original, widthIn: fig.originalWidthIn || fig.widthIn, heightIn: fig.originalHeightIn || fig.heightIn },
 			options: (data.options || [])[fig.analysis - 1] || {},
 			analysisName: analysis.name || "",

@@ -2614,6 +2614,32 @@ function _apaFigureIntervalNote(info) {
 	return null;
 }
 
+// The text width of a portrait page with 1 in margins (US Letter; A4 is 6.27 in)
+const apaFigurePortraitWidth = 6.5;
+
+function _apaSuggestFigureTitle(facts) {
+	/**
+	 * A figure title from what the plot draws: "Heart Rate by Group and Gender" (y by x and the legend), or
+	 * "Distribution of Sum Score" for histograms and densities. Null when the axes don't say enough.
+	 */
+	let plot = facts && facts.plots && facts.plots[0];
+	if (!plot)
+		return null;
+	let word = function (v) {
+		if (typeof v !== "string")
+			return null;
+		v = v.trim();
+		return v && !/[\[\]~"]|^\(?\w\)?$/.test(v) ? v : null;  // no plotmath, no lone symbols
+	};
+	let x = word(plot.x), y = word(plot.y);
+	let legend = word(plot.colour) || word(plot.fill) || word(plot.shape) || word(plot.linetype);
+	if (x && (!y || /^(density|counts?|frequency|proportion|percent(age)?)$/i.test(y)))
+		return apaTitleCase("Distribution of " + x);
+	if (!x || !y || /quantile|residual|fitted|predicted|index|observation/i.test(x + " " + y))
+		return null;  // diagnostic plots: their JASP title says it better
+	return apaTitleCase(y + " by " + x + (legend && legend !== x && legend !== y ? " and " + legend : ""));
+}
+
 function buildAPAFigure(info, figureNumber) {
 	/**
 	 * Builds an APA 7 figure: "Figure N" in bold, the title in italic title case, the picture at a size where its
@@ -2636,8 +2662,16 @@ function buildAPAFigure(info, figureNumber) {
 	let variables = info.variables || [];
 	let namesVariable = variables.some(function (v) { return v && new RegExp("(^|\\W)" + v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\W|$)", "i").test(raw); });
 	if (!namesVariable || raw.trim() === "") {
-		titleHtml += (titleHtml ? " " : "") + _apaTodo(i18n("say what the figure shows"));
-		todo.push(i18n("make the title say what the figure shows"));
+		// A title from what the plot draws ("Heart Rate by Group and Gender"), for the student to check
+		let suggested = _apaSuggestFigureTitle(info.facts);
+		if (suggested) {
+			titleHtml = _apaTodo(suggested).replace(/>\[|\]</g, function (m) { return m[0] === ">" ? ">" : "<"; });
+			todo.push(i18n("check the suggested title"));
+		}
+		else {
+			titleHtml += (titleHtml ? " " : "") + _apaTodo(i18n("say what the figure shows"));
+			todo.push(i18n("make the title say what the figure shows"));
+		}
 	}
 	log.add(i18n("Title"), i18n("Figure number in bold, then the title in italic title case on the next line, both above the figure. APA wants the title to say what the figure shows (APA 7, 7.24)."), [{ from: _apaEscape(raw), to: titleHtml }]);
 
@@ -2686,10 +2720,20 @@ function buildAPAFigure(info, figureNumber) {
 	let px = function (inches) { return Math.round(inches * 96); };
 	let img = '<img src="' + _apaEscape(image.src || "") + '" width="' + px(w) + '" height="' + px(h) + '" style="width: ' + w.toFixed(2) + 'in; height: ' + h.toFixed(2) + 'in;" alt="' + _apaEscape(title) + '">';
 
+	// Wider than a portrait page's text (6.5 in): the figure keeps its size, so its text stays readable, and a
+	// reminder asks for a landscape page, as for tables
+	let tooWide = w > apaFigurePortraitWidth + 0.01 || image.landscape === true;
+	if (tooWide) {
+		log.add(i18n("Page width"), i18n("The figure is wider than a portrait page, so a reminder asks for a landscape page instead of shrinking its text below 8 pt."));
+		todo.push(i18n("put the figure on a landscape page, it is too wide for a portrait page"));
+	}
+
 	let noteLabel = i18n("Note.");
 	let html = '<div style="font-size: 12pt; font-weight: normal; font-style: normal;">';
 	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><b>' + _apaEscape(i18n("Figure")) + " " + figureNumber + "</b></p>";
 	html += '<p style="margin: 0 0 6pt 0; font-weight: normal;"><i>' + titleHtml + "</i></p>";
+	if (tooWide)
+		html += '<p style="margin: 0 0 6pt 0; font-weight: normal;">' + _apaTodo(i18n("Too wide for a portrait page: put this figure on a landscape page")) + "</p>";
 	html += '<p style="margin: 0 0 6pt 0;">' + img + "</p>";
 	if (notes.length > 0)
 		html += '<p style="margin: 6pt 0 0 0; font-weight: normal;"><i>' + _apaEscape(noteLabel) + "</i> " + notes.join(" ") + "</p>";

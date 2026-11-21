@@ -74,7 +74,8 @@ apaGgplot <- function(p, changes) {
   if (is.character(ytitle) && length(ytitle) == 1 && nchar(ytitle) > 40 && !grepl("\n", ytitle))
     p$labels$y <- paste(strwrap(ytitle, width = max(25, ceiling(nchar(ytitle) / 2) + 3)), collapse = "\n")
   margin <- tryCatch(ggplot2::calc_element("plot.margin", th), error = function(e) NULL)
-  if (!is.null(margin)) p <- p + ggplot2::theme(plot.margin = margin + grid::unit(c(0, 6, 0, 0), "pt"))
+  textOnly <- length(p$layers) > 0 && all(grepl("Text|Label|Blank", vapply(p$layers, function(l) class(l$geom)[1], "")))
+  if (!is.null(margin) && !textOnly) p <- p + ggplot2::theme(plot.margin = margin + grid::unit(c(0, 6, 0, 0), "pt"))
   # text drawn in the plot at 8 pt or more once printed (ggplot sizes text layers in mm; 1 mm = 2.845 pt)
   minSize <- 8 / (2.845 * apaScaleK)
   for (i in seq_along(p$layers)) if (grepl("Text|Label", class(p$layers[[i]]$geom)[1])) {
@@ -131,13 +132,34 @@ isBoundedPlot <- function(p) {
   }))
   any(grepl("rho|\u03c1|correlation|proportion|theta|\u03b8", titles, ignore.case = TRUE))
 }
+# Text drawn in the plot no bigger than this many points once printed (and still 8 pt or more)
+capText <- function(g, pt) {
+  most <- pt / (2.845 * apaScaleK)
+  for (i in seq_along(g$layers)) if (grepl("Text|Label", class(g$layers[[i]]$geom)[1])) {
+    size <- g$layers[[i]]$aes_params$size
+    if (is.null(size)) size <- g$layers[[i]]$geom$default_aes$size
+    if (is.numeric(size) && length(size) == 1 && size > most) g$layers[[i]]$aes_params$size <- most
+  }
+  g
+}
+apaPanelIn <- Inf   # printed width of one panel in a matrix layout, set by figures.R; narrow panels get fewer ticks
 apaPlot <- function(p) {
   changes <- local({ v <- character(); list(add = function(x) v <<- c(v, x), get = function() v) })
   bounded <- isBoundedPlot(p)
   if (inherits(p, "ggplot")) p <- boundedText(apaGgplot(p, changes), bounded)
   else if (inherits(p, "jaspGraphsPlot")) for (i in seq_along(p$subplots)) if (inherits(p$subplots[[i]], "ggplot")) {
     q <- boundedText(apaGgplot(p$subplots[[i]], changes), bounded)
-    p$subplots[[i]] <- if (dataPanels(p) >= 4) thinBreaks(q) else q   # matrix layouts: little room per panel
+    # matrix layouts: little room per panel, so fewer ticks and text in the panels at 9 pt (JASP sizes it for its
+    # own, larger panels; "r = .43" and "rho = .46" then overlap)
+    if (dataPanels(p) >= 4) {
+      q <- capText(thinBreaks(q), 9)
+      # more room on the right: the last column's end tick label ("800") is centred on the panel's edge
+      # (only on panels that draw data: a text-only cell's label fills it, and a margin would cut the label)
+      drawsData <- any(!grepl("Text|Label|Blank|RangeFrame", vapply(q$layers, function(l) class(l$geom)[1], "")))
+      m <- tryCatch(ggplot2::calc_element("plot.margin", ggplot2:::plot_theme(q)), error = function(e) NULL)
+      if (drawsData && !is.null(m)) q <- q + ggplot2::theme(plot.margin = m + grid::unit(c(0, 8, 0, 0), "pt"))
+    }
+    p$subplots[[i]] <- q
   }
   attr(p, "apaChanges") <- changes$get()
   p
@@ -224,7 +246,7 @@ thinBreaks <- function(p) {
     # the smallest even step that lands on the last tick and leaves 5 ticks or fewer (11 ticks: every 5th)
     # and never fewer than 3 (an axis with only its two ends can't be read): no such step, no thinning
     # long labels ("2000") get 3 ticks at most, short ones 5
-    most <- if (max(nchar(format(abs(b), trim = TRUE, scientific = FALSE, drop0trailing = TRUE))) >= 4) 3 else 5
+    most <- if (max(nchar(format(abs(b), trim = TRUE, scientific = FALSE, drop0trailing = TRUE))) >= 4 || apaPanelIn < 1.3) 3 else 5
     steps <- Filter(function(st) (n - 1) %% st == 0 && (n - 1) / st + 1 <= most && (n - 1) / st + 1 >= 3, seq_len(n - 1))
     lab <- sc$labels
     if (length(steps) > 0) {

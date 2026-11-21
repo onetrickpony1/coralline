@@ -972,6 +972,20 @@ function test_buildAPAFigure() {
 	t(robust.html.indexOf("BF₁₀ = Bayes factor in favour of the alternative hypothesis.") !== -1, true, "figure: BF10 written as plotmath is explained in the note");
 	var ci = buildAPAFigure({ title: "drp", plotName: "x", analysisName: "TTestIndependentSamples", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], y: "Mean (95% CI)" }] }, variables: ["drp"] }, 1);
 	t(ci.html.indexOf("CI = confidence interval.") !== -1, true, "figure: CI in an axis title is explained");
+
+	var means = buildAPAFigure({ title: "", containerTitles: ["Descriptives", "Descriptives plots"], plotName: "p", analysisName: "Anova", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], x: "Group", y: "Heart Rate", colour: "Gender" }] }, variables: ["Heart Rate", "Group", "Gender"] }, 1);
+	t(means.text.split("\n")[1], "Heart Rate by Group and Gender", "figure: a title suggested from the axes and legend");
+	t(means.todo.indexOf("check the suggested title") !== -1, true, "figure: the suggested title is marked to check");
+	var histogram = buildAPAFigure({ title: "", plotName: "p", analysisName: "Descriptives", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBar"], x: "Sum Score", y: "Counts" }] }, variables: ["Sum Score"] }, 1);
+	t(histogram.text.split("\n")[1], "Distribution of Sum Score", "figure: histograms suggest a distribution title");
+	var qq = buildAPAFigure({ title: "Q-Q Plot", plotName: "p", analysisName: "Anova", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], x: "Theoretical quantiles", y: "Standardized residuals" }] } }, 1);
+	t(qq.todo.indexOf("make the title say what the figure shows") !== -1, true, "figure: diagnostic plots get no suggestion");
+	var wide = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 8.4, heightIn: 6 } }, 1);
+	t(wide.html.indexOf("put this figure on a landscape page") !== -1 && wide.todo.length === 1, true, "figure: too wide for portrait asks for landscape");
+	t(wide.html.indexOf("width: 8.40in") !== -1, true, "figure: a wide figure keeps its size");
+	var narrow = buildAPAFigure({ title: "drp", plotName: "p", analysisName: "x", options: {}, variables: ["drp"], image: { src: "x", widthIn: 6.5, heightIn: 4 } }, 1);
+	t(narrow.html.indexOf("landscape") === -1, true, "figure: a page-wide figure fits portrait");
 }
 
 function runAllUtilTests() {
