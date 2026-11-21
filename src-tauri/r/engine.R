@@ -161,8 +161,25 @@ floorFonts <- function(g, smallest) {
   }
   g
 }
+# jaspBase's decodeplot (on ggplot2 4) takes a legend a plot hid (guide = NULL) or a legend title it removed
+# (guide_legend(title = NULL)) for one not set, and draws it: JASP's PROCESS diagrams get an "as.factor(nodeVis)"
+# legend and a "nodeType" title. Marked so that decoding keeps them hidden: "none", and a title that stays empty.
+keepHiddenGuides <- function(p) {
+  if (inherits(p, "jaspGraphsPlot")) { p$subplots <- lapply(p$subplots, keepHiddenGuides); return(p) }
+  if (!inherits(p, "ggplot") || utils::packageVersion("ggplot2") < "4.0.0") return(p)
+  p$scales$scales <- lapply(p$scales$scales, function(s) {
+    if (!any(s$aesthetics %in% c("colour", "fill", "shape", "linetype", "alpha", "size"))) return(s)
+    if (is.null(s$guide)) { s <- s$clone(); s$guide <- "none" }
+    else if (inherits(s$guide, "Guide") && "title" %in% names(s$guide$params) && is.null(s$guide$params$title)) {
+      # in place: the plot comes from our own rerun, and a ggproto child copy (as decodeplot makes one) loops
+      params <- s$guide$params; params$title <- function(t) NULL; s$guide$params <- params
+    }
+    s
+  })
+  p
+}
 drawJasp <- function(p) {
-  d <- jaspBase:::decodeplot(p)
+  d <- jaspBase:::decodeplot(keepHiddenGuides(p))
   if (inherits(d, "patchwork")) {
     g <- tryCatch(floorFonts(patchwork::patchworkGrob(d), 8 / apaScaleK), error = function(e) NULL)
     if (!is.null(g)) { grid::grid.newpage(); grid::grid.draw(g); return(invisible()) }
