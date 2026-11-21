@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +40,12 @@ pub struct Data {
     columns: Vec<(String, String, i64)>,
     /// Stored columns of nominal or ordinal type (they mark a missing level with -1)
     categorical: BTreeSet<String>,
+    /// Stored columns that hold the values themselves, never label codes: the `_DBL` half of JASP 0.95 and
+    /// 0.96 files, whose `_INT` half holds the codes
+    plain: BTreeSet<String>,
+    /// Each stored column's own missing-value list (Columns.emptyValuesJson when it is custom), which JASP joins
+    /// with the file's list
+    own_empties: BTreeMap<String, Vec<String>>,
     /// Text that JASP reads as missing ("NaN", ".", "NA", ...), from the file's settings
     empty_values: Vec<String>,
 }
@@ -62,21 +68,59 @@ impl Data {
             .ok()
             .map(|id| format!("Filter_{id}"))
             .filter(|name| stored.contains(name));
-        let categorical: BTreeSet<String> = {
-            let mut statement =
-                connection.prepare("SELECT id FROM Columns WHERE dataSet = ?1 AND columnType IN ('nominal', 'ordinal', 'nominalText')")?;
-            let ids = statement.query_map([data_set], |r| r.get::<_, i64>(0))?.collect::<Result<Vec<_>, _>>()?;
-            ids.into_iter().map(|id| format!("Column_{id}")).collect()
+        // JASP 0.95 and most 0.96 files keep two columns per variable: Column_<id>_INT, the label code, and
+        // Column_<id>_DBL, the value. Groups are counted from their codes, scale columns from their values
+        // (their codes can be broken, as JASP's Column::dbLoadOldIndex notes).
+        let old_layout = stored.iter().any(|name| name.starts_with("Column_") && name.ends_with("_INT"));
+        let mut plain = BTreeSet::new();
+        let mut own = BTreeMap::new();
+        let has_column_empties = {
+            let mut statement = connection.prepare("PRAGMA table_info(Columns)")?;
+            let names = statement.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+            names.iter().any(|n| n == "emptyValuesJson")
         };
+        let own_empties = |id: i64| -> Vec<String> {
+            if !has_column_empties {
+                return Vec::new();
+            }
+            connection
+                .query_row("SELECT emptyValuesJson FROM Columns WHERE id = ?1", [id], |r| r.get::<_, Option<String>>(0))
+                .ok()
+                .flatten()
+                .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+                .filter(|v| v.get("custom").and_then(Value::as_bool) == Some(true))
+                .and_then(|v| v.get("strings").and_then(Value::as_array).cloned())
+                .map(|list| list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
+        let mut categorical = BTreeSet::new();
         let columns = {
-            let mut statement = connection.prepare("SELECT id, name FROM Columns WHERE dataSet = ?1")?;
+            let mut statement = connection.prepare(
+                "SELECT id, name, columnType IN ('nominal', 'ordinal', 'nominalText'), \
+                 EXISTS (SELECT 1 FROM Labels WHERE columnId = Columns.id) FROM Columns WHERE dataSet = ?1",
+            )?;
             let rows = statement
-                .query_map([data_set], |r| {
-                    let id = r.get::<_, i64>(0)?;
-                    Ok((r.get::<_, String>(1)?, format!("Column_{id}"), id))
-                })?
+                .query_map([data_set], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, r.get::<_, bool>(3)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
-            rows.into_iter().filter(|(_, stored_as, _)| stored.contains(stored_as)).collect()
+            let mut columns = Vec::new();
+            for (id, name, is_group, has_labels) in rows {
+                let stored_as = if !old_layout {
+                    format!("Column_{id}")
+                } else if is_group && has_labels {
+                    format!("Column_{id}_INT")
+                } else {
+                    plain.insert(format!("Column_{id}_DBL"));
+                    format!("Column_{id}_DBL")
+                };
+                if is_group {
+                    categorical.insert(stored_as.clone());
+                }
+                if stored.contains(&stored_as) {
+                    own.insert(stored_as.clone(), own_empties(id));
+                    columns.push((name, stored_as, id));
+                }
+            }
+            columns
         };
         let mut empty_values: Vec<String> = ["", "NaN", "nan", ".", "NA"].iter().map(|s| s.to_string()).collect();
         let settings: Option<String> = connection
@@ -89,7 +133,7 @@ impl Data {
         {
             empty_values.extend(list.iter().filter_map(|v| v.as_str().map(str::to_string)));
         }
-        Ok(Data { connection, table, filter, columns, categorical, empty_values })
+        Ok(Data { connection, table, filter, columns, categorical, plain, own_empties: own, empty_values })
     }
 
     fn stored(&self, name: &str) -> Option<&str> {
@@ -101,11 +145,32 @@ impl Data {
     fn present(&self, column: &str) -> String {
         let id = self.columns.iter().find(|(_, s, _)| s == column).map_or(-1, |(_, _, id)| *id);
         let quote = |v: &String| format!("'{}'", v.replace('\'', "''"));
-        let empties = self.empty_values.iter().map(quote).collect::<Vec<_>>().join(", ");
+        // the file's missing-value list joined with the column's own
+        let list: Vec<&String> =
+            self.empty_values.iter().chain(self.own_empties.get(column).into_iter().flatten()).collect();
+        let empties = list.iter().map(|v| quote(v)).collect::<Vec<_>>().join(", ");
         // Every value has a label row, "" when it has no label: only real labels can mark a missing value
-        let empty_labels = self.empty_values.iter().filter(|v| !v.is_empty()).map(quote).collect::<Vec<_>>().join(", ");
+        let empty_labels = list.iter().filter(|v| !v.is_empty()).map(|v| quote(v)).collect::<Vec<_>>().join(", ");
+        // missing-value numbers (such as -99)
+        let numbers: Vec<String> = list
+            .iter()
+            .filter_map(|v| v.trim().parse::<f64>().ok())
+            .filter(|n| n.is_finite())
+            .map(|n| format!("{n:?}"))
+            .collect();
         // Coded columns (nominal, ordinal, or any column with value labels) mark a missing value with -1,
         // unless -1 is a real code
+        if self.plain.contains(column) {
+            // values, not codes: a missing value is NULL, a missing-value text ("nan"), or a missing-value number
+            let numbers = if numbers.is_empty() {
+                String::new()
+            } else {
+                format!(" AND NOT (typeof(\"{column}\") IN ('real', 'integer') AND \"{column}\" IN ({}))", numbers.join(", "))
+            };
+            return format!(
+                "\"{column}\" IS NOT NULL AND NOT (typeof(\"{column}\") = 'text' AND \"{column}\" IN ({empties})){numbers}"
+            );
+        }
         let coded = self.categorical.contains(column)
             || self
                 .connection
@@ -116,10 +181,19 @@ impl Data {
         } else {
             String::new()
         };
+        // a label is a missing value when its text is on the list, or when its original value is a number on it
+        let number_labels = if numbers.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " OR (trim(originalValueJson, ' ' || char(10)) GLOB '[0-9+.-]*' AND CAST(originalValueJson AS REAL) IN ({}))",
+                numbers.join(", ")
+            )
+        };
         format!(
             "\"{column}\" IS NOT NULL AND \"{column}\" <> {MISSING_INT} \
              AND NOT (typeof(\"{column}\") = 'text' AND \"{column}\" IN ({empties})) \
-             AND \"{column}\" NOT IN (SELECT value FROM Labels WHERE columnId = {id} AND label IN ({empty_labels})){no_level}"
+             AND \"{column}\" NOT IN (SELECT value FROM Labels WHERE columnId = {id} AND (label IN ({empty_labels}){number_labels})){no_level}"
         )
     }
 
@@ -141,9 +215,13 @@ impl Data {
         }
         // Columns with value labels store codes: the number itself is the label's original value
         let id = self.columns.iter().find(|(_, s, _)| s == count_column).map_or(-1, |(_, _, id)| *id);
-        let value = format!(
+        let value = if self.plain.contains(count_column) {
+            format!("CAST(\"{count_column}\" AS REAL)")
+        } else {
+            format!(
             "COALESCE((SELECT CAST(originalValueJson AS REAL) FROM Labels WHERE columnId = {id} AND value = \"{count_column}\" LIMIT 1), CAST(\"{count_column}\" AS REAL))"
-        );
+            )
+        };
         let total: f64 = self.connection.query_row(
             &format!("SELECT COALESCE(SUM({value}), 0) FROM \"{}\" WHERE {}", self.table, conditions.join(" AND ")),
             [],
@@ -458,6 +536,66 @@ pub(crate) mod tests {
         // w is a scale column where -1 is a value; g2 is nominal with -1 (no level) in row 2
         let o = options(json!({ "types": ["scale", "nominal"], "value": ["w", "g2"] }), Some("listwise"));
         assert_eq!(data.sample_size(&o), Some(SampleSize::N(3)));
+    }
+
+    #[test]
+    fn old_files_count_groups_by_code_and_scales_by_value() {
+        // JASP 0.95 and 0.96 store Column_<id>_INT (codes) and Column_<id>_DBL (values, "nan" when missing)
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE DataSets (id INTEGER PRIMARY KEY, emptyValuesJson TEXT);
+             CREATE TABLE Filters (id INTEGER PRIMARY KEY, dataSet INT);
+             CREATE TABLE Columns (id INTEGER PRIMARY KEY, dataSet INT, name TEXT, columnType TEXT, emptyValuesJson TEXT);
+             CREATE TABLE Labels (id INTEGER PRIMARY KEY, columnId INT, value INT, label TEXT, originalValueJson TEXT);
+             INSERT INTO DataSets VALUES (1, '{\"custom\": true, \"strings\": [\".\", \"nan\"]}');
+             INSERT INTO Filters VALUES (1, 1);
+             INSERT INTO Columns VALUES (1, 1, 'x', 'scale', '{\"custom\": true, \"strings\": [\"-99\"]}'), (2, 1, 'sex', 'nominal', NULL), (3, 1, 'n', 'scale', NULL);
+             INSERT INTO Labels VALUES (1, 1, 1, '', '-1'), (2, 1, 2, '', '2.5'), (3, 2, 0, 'F', '\"F\"'), (4, 2, 1, 'M', '\"M\"'), (5, 3, 1, '', '10'), (6, 3, 2, '', '20');
+             CREATE TABLE DataSet_1 (rowNumber INTEGER PRIMARY KEY, Filter_1 INT NOT NULL DEFAULT 1, Column_1_DBL REAL NULL, Column_1_INT INT NULL, Column_2_DBL REAL NULL, Column_2_INT INT NULL, Column_3_DBL REAL NULL, Column_3_INT INT NULL);
+             INSERT INTO DataSet_1 VALUES (1, 1, -1.0, 1, 'nan', 0, 10.0, 1), (2, 1, 2.5, 2, 'nan', -2147483648, 20.0, 2), (3, 1, 'nan', -2147483648, 'nan', 1, 10.0, 1), (4, 1, 2.5, 2, 'nan', 1, 20.0, 2), (5, 0, 2.5, 2, 'nan', 0, 10.0, 1), (6, 1, -99.0, 3, 'nan', 0, 0.0, 3);",
+        )
+        .unwrap();
+        drop(c);
+        let data = Data::open(&path).unwrap();
+        // x: -1 is a value, 'nan' (row 3) and the column's own missing number -99 (row 6) are missing;
+        // sex: row 2 is missing; row 5 is filtered out
+        let o = options(json!({ "types": ["scale", "nominal"], "value": ["x", "sex"] }), Some("listwise"));
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(2)));
+        // counts add up their values, not their codes: 10 + 20 + 10 + 20 (row 5 is filtered out)
+        assert_eq!(data.sum("Column_3_DBL", &[]).ok(), Some(60));
+    }
+
+    #[test]
+    fn coded_columns_join_their_own_missing_list_with_the_files() {
+        // a labelled column whose own list adds -99: the label with original value -99 is missing, and the
+        // file's "." still counts
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sqlite");
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE DataSets (id INTEGER PRIMARY KEY, emptyValuesJson TEXT);
+             CREATE TABLE Filters (id INTEGER PRIMARY KEY, dataSet INT);
+             CREATE TABLE Columns (id INTEGER PRIMARY KEY, dataSet INT, name TEXT, columnType TEXT, emptyValuesJson TEXT);
+             CREATE TABLE Labels (id INTEGER PRIMARY KEY, columnId INT, value INT, label TEXT, originalValueJson TEXT);
+             INSERT INTO DataSets VALUES (1, '{\"custom\": true, \"strings\": [\".\"]}');
+             INSERT INTO Filters VALUES (1, 1);
+             INSERT INTO Columns VALUES (1, 1, 'score', 'ordinal', '{\"custom\": true, \"strings\": [\"-99\"]}'), (2, 1, 'other', 'ordinal', NULL);
+             INSERT INTO Labels VALUES (1, 1, 0, '', '1'), (2, 1, 1, '', '-99.0'), (3, 1, 2, '.', '\".\"'), (4, 1, 3, 'abc', 'abc'),
+                                       (5, 2, 0, '', '1'), (6, 2, 1, '', '-99');
+             CREATE TABLE DataSet_1 (rowNumber INTEGER PRIMARY KEY, Filter_1 INT NOT NULL DEFAULT 1, Column_1 NUM NULL, Column_2 NUM NULL);
+             INSERT INTO DataSet_1 VALUES (1, 1, 0, 0), (2, 1, 1, 1), (3, 1, 2, 1), (4, 1, 3, 0), (5, 1, 0, 1);",
+        )
+        .unwrap();
+        drop(c);
+        let data = Data::open(&path).unwrap();
+        // score: rows 1, 4 and 5 (row 2 is -99, row 3 is ".")
+        let o = options(json!({ "types": ["ordinal"], "value": ["score"] }), None);
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(3)));
+        // other has no list of its own, so -99 is a value there
+        let o = options(json!({ "types": ["ordinal"], "value": ["other"] }), None);
+        assert_eq!(data.sample_size(&o), Some(SampleSize::N(5)));
     }
 
     #[test]
