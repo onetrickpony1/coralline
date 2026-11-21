@@ -11,6 +11,41 @@ dir.create(outDir, showWarnings = FALSE, recursive = TRUE); dir.create(workDir, 
 
 # jaspTools writes its set-up into its own folder, which is read-only inside JASP: use a copy in the work folder
 libs <- list.dirs(modulesRoot, recursive = FALSE)
+
+# Each analysis runs with its own module's folder first, as in JASP, which starts an engine per module: modules bundle
+# copies of other modules in other versions (jaspAnova and jaspClassicalTests carry a newer jaspTTests and
+# jaspFrequencies than those modules' own folders), and one R session can only load one version of a package. A file
+# with analyses from several modules gets one R session per module (CORALLINE_MODULE), merged at the end.
+analysisModules <- tryCatch({
+  .libPaths(c(libs, .libPaths()))
+  con <- unz(jaspFile, "analyses.json"); text <- paste(readLines(con, warn = FALSE), collapse = "\n"); close(con)
+  vapply(jsonlite::fromJSON(text, simplifyVector = FALSE)$analyses, function(a) { m <- a$dynamicModule$moduleName; if (is.character(m)) m else "" }, "")
+}, error = function(e) character())
+moduleList <- unique(analysisModules[nzchar(analysisModules)])
+onlyModule <- Sys.getenv("CORALLINE_MODULE")
+if (!nzchar(onlyModule) && length(moduleList) > 1) {
+  script <- file.path(here, "figures.R"); rscript <- file.path(R.home("bin"), "Rscript")
+  for (m in moduleList) system2(rscript, shQuote(c(script, jaspFile, outDir, workDir, modulesRoot)), env = paste0("CORALLINE_MODULE=", m))
+  analyses <- list(); figures <- list(); rerun <- vector("list", length(analysisModules))
+  for (m in moduleList) {
+    part <- tryCatch(jsonlite::read_json(file.path(outDir, paste0("figures-", m, ".json")), simplifyVector = FALSE), error = function(e) NULL)
+    again <- tryCatch(jsonlite::read_json(file.path(outDir, paste0("rerun-", m, ".json")), simplifyVector = FALSE), error = function(e) NULL)
+    for (a in part$analyses) if (is.list(a) && !is.null(a$analysis)) analyses[[a$analysis]] <- a
+    figures <- c(figures, part$figures)
+    for (i in seq_along(again)) if (!is.null(again[[i]])) rerun[i] <- list(again[[i]])
+  }
+  for (i in seq_along(analysisModules)) if (length(analyses) < i || is.null(analyses[[i]]))
+    analyses[[i]] <- list(analysis = i, name = NA, status = "error", error = "the rerun of this module stopped", seconds = 0)
+  figures <- figures[order(vapply(figures, function(f) as.numeric(f$analysis), 0))]
+  jsonlite::write_json(list(file = basename(jaspFile), analyses = analyses, figures = figures), file.path(outDir, "figures.json"), auto_unbox = TRUE, null = "null", na = "null", pretty = TRUE)
+  jsonlite::write_json(rerun, file.path(outDir, "rerun.json"), auto_unbox = TRUE, digits = NA, null = "null", na = "null")
+  quit(save = "no")
+}
+ownModule <- if (nzchar(onlyModule)) onlyModule else if (length(moduleList) == 1) moduleList else ""
+if (nzchar(ownModule) && dir.exists(file.path(modulesRoot, ownModule)))
+  libs <- c(file.path(modulesRoot, ownModule), setdiff(libs, file.path(modulesRoot, ownModule)))
+mine <- function(i) !nzchar(onlyModule) || i > length(analysisModules) || analysisModules[i] == onlyModule ||
+  (!nzchar(analysisModules[i]) && onlyModule == moduleList[1])   # analyses without a module go with the first
 rlib <- file.path(workDir, "rlib")
 src <- Filter(dir.exists, file.path(libs, "jaspTools"))[1]
 if (is.na(src)) stop("jaspTools not found in JASP's modules")
@@ -38,6 +73,7 @@ ds <- tryCatch(readJaspData(jaspFile), error = function(e) data.frame())
 apaVariables <- colnames(ds)   # title case leaves the data's own names alone
 analyses <- list(); figures <- list(); rerun <- vector("list", length(opts))
 for (i in seq_along(opts)) {
+  if (!mine(i)) next
   o <- opts[[i]]; err <- NULL; t0 <- Sys.time()
   setTimeLimit(elapsed = 180, transient = TRUE)
   res <- tryCatch(runJasp(o, ds), error = function(e) { err <<- conditionMessage(e); NULL })
@@ -87,6 +123,7 @@ for (i in seq_along(opts)) {
   analyses[[i]] <- list(analysis = i, name = attr(o, "analysisName"), status = if (is.null(res)) "error" else as.character(res$status),
     error = err, seconds = round(as.numeric(Sys.time() - t0, units = "secs"), 1))
 }
-jsonlite::write_json(list(file = basename(jaspFile), analyses = analyses, figures = figures), file.path(outDir, "figures.json"), auto_unbox = TRUE, null = "null", na = "null", pretty = TRUE)
-jsonlite::write_json(rerun, file.path(outDir, "rerun.json"), auto_unbox = TRUE, digits = NA, null = "null", na = "null")
+suffix <- if (nzchar(onlyModule)) paste0("-", onlyModule) else ""
+jsonlite::write_json(list(file = basename(jaspFile), analyses = analyses, figures = figures), file.path(outDir, paste0("figures", suffix, ".json")), auto_unbox = TRUE, null = "null", na = "null", pretty = TRUE)
+jsonlite::write_json(rerun, file.path(outDir, paste0("rerun", suffix, ".json")), auto_unbox = TRUE, digits = NA, null = "null", na = "null")
 cat("done\n")

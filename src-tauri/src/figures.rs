@@ -253,6 +253,8 @@ fn same_value(a: &serde_json::Value, b: &serde_json::Value) -> bool {
                 x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same_value(v, w)))
             }
             (serde_json::Value::Array(x), serde_json::Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same_value(v, w)),
+            // an empty cell: older JASP saved null, JASP 0.99 writes "" (both show as a blank cell)
+            (serde_json::Value::Null, serde_json::Value::String(t)) | (serde_json::Value::String(t), serde_json::Value::Null) => t.is_empty(),
             _ => a == b,
         },
     }
@@ -461,6 +463,9 @@ mod tests {
         assert!(super::same_tables(&json!({}), &saved).is_err(), "nothing to check against");
         let cell = table(json!([{ "m": { "format": "dp:3", "value": 360.0 } }]));
         assert!(super::same_tables(&cell, &table(json!([{ "m": { "format": "dp:3", "value": 360 } }]))).is_ok(), "cells with a format, 360.0 = 360");
+        let blank = table(json!([{ "v": "Residuals", "eta": null }]));
+        assert!(super::same_tables(&blank, &table(json!([{ "v": "Residuals", "eta": "" }]))).is_ok(), "an empty cell: null saved, \"\" in JASP 0.99");
+        assert!(super::same_tables(&blank, &table(json!([{ "v": "Residuals", "eta": "x" }]))).is_err(), "text where the file had nothing");
     }
 
     #[test]
