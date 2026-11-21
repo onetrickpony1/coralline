@@ -54,6 +54,46 @@ formDefaults <- function(name) {
   }
   NULL
 }
+# JASP's upgrade rules (each module's Upgrades.qml): when JASP opens an older file it renames analyses and options
+# that later versions renamed. The rerun applies the two simple kinds, a new function name and ChangeRename; rules
+# written in JavaScript (ChangeJS) can't run here, and an analysis they would change falls back to JASP's picture
+# through the trust check. A rule applies only when its old name is in the options (or the old function is gone)
+# and the new one isn't (an analysis that still has its old name predates the rename), so newer files aren't touched.
+upgradeRules <- local({
+  rules <- NULL
+  function() {
+    if (!is.null(rules)) return(rules)
+    rules <<- list()
+    for (f in list.files(moduleRoot, pattern = "^Upgrades\\.qml$", recursive = TRUE, full.names = TRUE)) {
+      text <- paste(readLines(f, warn = FALSE), collapse = "\n")
+      for (block in strsplit(text, "\\bUpgrade\\s*\\{")[[1]][-1]) {
+        field <- function(key) { m <- regmatches(block, regexec(paste0("\\b", key, ":\\s*\"([^\"]+)\""), block))[[1]]; if (length(m) > 1) m[2] else NA }
+        fn <- field("functionName"); if (is.na(fn)) next
+        renames <- regmatches(block, gregexpr("ChangeRename\\s*\\{[^}]*\\}", block))[[1]]
+        pairs <- lapply(renames, function(r) c(sub('.*from:\\s*"([^"]+)".*', "\\1", r), sub('.*to:\\s*"([^"]+)".*', "\\1", r)))
+        rules[[length(rules) + 1]] <<- list(fn = fn, newFn = field("newFunctionName"), renames = pairs)
+      }
+    }
+    rules
+  }
+})
+applyUpgrades <- function(o) {
+  name <- attr(o, "analysisName")
+  for (step in 1:5) {   # renames can chain (an analysis renamed, then its options)
+    changed <- FALSE
+    for (r in upgradeRules()) {
+      if (r$fn != name) next
+      for (pair in r$renames) if (pair[1] %in% names(o) && !pair[2] %in% names(o)) { names(o)[names(o) == pair[1]] <- pair[2]; changed <- TRUE }
+      if (!is.na(r$newFn) && r$newFn != name) {   # a file that still uses the old name predates the rename
+        name <- r$newFn; changed <- TRUE
+      }
+    }
+    if (!changed) break
+  }
+  attr(o, "analysisName") <- name
+  o
+}
+
 fillDefaults <- function(o) {
   defaults <- tryCatch(suppressMessages(formDefaults(attr(o, "analysisName"))), error = function(e) NULL)
   missing <- setdiff(names(defaults), c(names(o), ".meta"))
@@ -66,7 +106,7 @@ fillDefaults <- function(o) {
 }
 
 runJasp <- function(o, ds) {
-  o <- fillDefaults(o)
+  o <- fillDefaults(applyUpgrades(o))
   name <- attr(o, "analysisName")
   enc <- if (ncol(ds) == 0) NULL else tryCatch(suppressWarnings(encodeOptionsAndDataset(o, ds)), error = function(e) NULL)
   map <- if (is.null(enc)) NULL else enc$encodingMap
