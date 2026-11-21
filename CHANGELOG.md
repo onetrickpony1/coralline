@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-11-21
+
+### Fixes
+- **Figures redraw from files saved by JASP 0.95 and 0.96.** Their data uses a two-column layout Coralline couldn't read, so every figure fell back to JASP's own picture. Now these files are redrawn in APA style like newer ones, and the sample size in table notes is counted from them too.
+- **Values are read the way JASP reads them.** Numbers written with thousands separators ("5,553") are no longer treated as missing. Groups coded "1.0" show as "1". Labelled values use JASP's 10-digit rounding. "nan" counts as missing, and each column's own missing-value codes are applied when counting the sample size.
+
 ## 0.2.0 - 2026-11-21
 
 ### Changes
