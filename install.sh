@@ -18,11 +18,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading $asset"
-curl -fL --progress-bar "https://github.com/$repo/releases/latest/download/$asset" -o "$tmp/$asset" || {
+# Releases up to 0.1.0 were named japasp-*: fall back to that name until a Coralline release is out
+curl -fsL "https://github.com/$repo/releases/latest/download/$asset" -o "$tmp/$asset" \
+	|| curl -fL --progress-bar "https://github.com/$repo/releases/latest/download/$(echo "$asset" | sed 's/^coralline/japasp/')" -o "$tmp/$asset" || {
 	echo "Couldn't download Coralline. Check your internet connection. If it works, there may be no release yet: see https://github.com/$repo/releases"
 	exit 1
 }
 tar -xzf "$tmp/$asset" -C "$tmp"
+[ -f "$tmp/coralline" ] || mv "$tmp/japasp" "$tmp/coralline"
 # Replace the file instead of writing into it, so a running copy keeps working until it closes
 cp "$tmp/coralline" "$dir/coralline.new"
 chmod 755 "$dir/coralline.new"

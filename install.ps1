@@ -18,14 +18,21 @@ try {
 	Write-Host 'Downloading Coralline'
 	$zip = Join-Path $tmp 'coralline.zip'
 	try {
-		Invoke-WebRequest -UseBasicParsing "https://github.com/$repo/releases/latest/download/coralline-windows-x86_64.zip" -OutFile $zip
+		try {
+			Invoke-WebRequest -UseBasicParsing "https://github.com/$repo/releases/latest/download/coralline-windows-x86_64.zip" -OutFile $zip
+		} catch {
+			# Releases up to 0.1.0 were named japasp-*: fall back to that name until a Coralline release is out
+			Invoke-WebRequest -UseBasicParsing "https://github.com/$repo/releases/latest/download/japasp-windows-x86_64.zip" -OutFile $zip
+		}
 	} catch {
 		Write-Host "Couldn't download Coralline. Check your internet connection. If it works, there may be no release yet: see https://github.com/$repo/releases"
 		return
 	}
 	Expand-Archive -Path $zip -DestinationPath $tmp -Force
 	New-Item -ItemType Directory -Force -Path $dir | Out-Null
-	Copy-Item (Join-Path $tmp 'coralline.exe') $exe -Force
+	$new = Join-Path $tmp 'coralline.exe'
+	if (-not (Test-Path $new)) { $new = Join-Path $tmp 'japasp.exe' }
+	Copy-Item $new $exe -Force
 } finally {
 	Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
