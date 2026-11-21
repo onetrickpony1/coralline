@@ -10,7 +10,7 @@ cargo test --no-default-features             # the .jasp reader, no WebKit neede
 ../tests/ui/run.sh                           # the interface with real tables, in headless Chrome
 ```
 
-`tests/ui/run.sh` uses JSON dumps in `tests/ui/fixtures/`, made with `japasp --json`. They aren't in the repo.
+`tests/ui/run.sh` uses JSON dumps in `tests/ui/fixtures/`, made with `coralline --json`. They aren't in the repo.
 
 The corpus check runs every table in JASP's Data Library through the copier and checks it: no crashes, every number of JASP's in the copy, APA *p* values, no exponents outside Bayes factors, every column headed, *N* from the tables matching *N* from the data.
 

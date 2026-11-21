@@ -1,32 +1,37 @@
-# jAPAsp
+# Coralline
 
-jAPAsp opens a saved [JASP](https://jasp-stats.org) file and turns every results table in it into an APA 7 table. Click **Copy APA table** and paste into Word or Google Docs. The tables are drawn by JASP's own code, so they show the same values JASP does. Your JASP file is only read, never changed.
+Coralline opens a saved [JASP](https://jasp-stats.org) file and turns every results table in it into an APA 7 table. Click **Copy APA table** and paste into Word or Google Docs. The tables are drawn by JASP's own code, so they show the same values JASP does. Your JASP file is only read, never changed.
 
 ## Install
 
-**Windows** (10 or 11): download [install.cmd](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/install.cmd) and double-click it. Windows warns about apps from small developers that few people have downloaded yet: choose **Run** (or **More info**, then **Run anyway**). Run it again whenever you want to update.
+**Windows** (10 or 11): download [install.cmd](https://github.com/onetrickpony1/coralline/releases/latest/download/install.cmd) and double-click it. Windows warns about apps from small developers that few people have downloaded yet: choose **Run** (or **More info**, then **Run anyway**). Run it again whenever you want to update.
 
-**Mac:** download [jAPAsp-install-mac.zip](https://github.com/onetrickpony1/jAPAsp/releases/latest/download/jAPAsp-install-mac.zip), open it, then right-click **install.command** and choose **Open** (a double-click is blocked the first time for apps from outside the App Store). Run it again to update.
+**Mac:** download [coralline-install-mac.zip](https://github.com/onetrickpony1/coralline/releases/latest/download/coralline-install-mac.zip), open it, then right-click **install.command** and choose **Open** (a double-click is blocked the first time for apps from outside the App Store). Run it again to update.
 
 **Linux**, or from Terminal on a Mac: paste this line and press Return. Run it again to update.
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/onetrickpony1/coralline/main/install.sh | sh
 ```
 
 Or, on Windows, from PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/onetrickpony1/jAPAsp/main/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/onetrickpony1/coralline/main/install.ps1 | iex"
 ```
 
-- Windows: jAPAsp goes in `%LOCALAPPDATA%\Programs\japasp`, with a Start menu entry.
-- Linux: jAPAsp goes in `~/.local/share/japasp`, with an app menu entry and the `japasp` command in `~/.local/bin`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch); the installer tells you if it's missing.
-- macOS: installed like on Linux, started with `japasp`.
+- Windows: Coralline goes in `%LOCALAPPDATA%\Programs\coralline`, with a Start menu entry.
+- Linux: Coralline goes in `~/.local/share/coralline`, with an app menu entry and the `coralline` command in `~/.local/bin`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch); the installer tells you if it's missing.
+- macOS: installed like on Linux, started with `coralline`.
+
+**Which JASP version**
+
+- **Tables:** Coralline reads `.jasp` files saved by JASP 0.97 or newer. It's tested with files from JASP 0.97, 0.97.1, 0.98 and 0.98.1. Files from older versions may work but aren't tested. You don't need JASP installed to copy tables.
+- **Figures** (plots as APA figures): Linux only for now, with JASP 0.98.1 installed from [Flathub](https://flathub.org/apps/org.jaspstats.JASP). Coralline reruns your analyses in that JASP to redraw the plots. On Windows and Mac, and without JASP, you get the tables only.
 
 ## Before you use it
 
-jAPAsp is a formatting helper. It saves you the fiddly work of making JASP's tables look the way APA 7 asks. It doesn't do your statistics or your thinking for you.
+Coralline is a formatting helper. It saves you the fiddly work of making JASP's tables look the way APA 7 asks. It doesn't do your statistics or your thinking for you.
 
 **What it does**
 
@@ -41,14 +46,14 @@ jAPAsp is a formatting helper. It saves you the fiddly work of making JASP's tab
 - It doesn't check your analysis. If you picked the wrong test or your data has a mistake, you'll get a neat table with the wrong results in it.
 - It doesn't explain your results or write them up. It won't tell you what a result means or whether it matters.
 - It doesn't pick which tables belong in your report. That's your choice.
-- It doesn't do graphs or plots yet. Only tables.
+- Graphs and plots only work on Linux so far (see **Which JASP version** above). Elsewhere it does tables only.
 - It only sees what you've saved in JASP. Save in JASP first, or your newest results won't be there.
 - It doesn't know your course's own rules. If your tutor or marking guide asks for something different from APA 7, do what they say.
 - It can't promise a perfect table every time. Look over every table before you hand your work in. It's still your work.
 
-If you aren't sure whether tools like this are allowed on your course, ask your tutor. jAPAsp is made by one person. It isn't made by the JASP team or by the APA.
+If you aren't sure whether tools like this are allowed on your course, ask your tutor. Coralline is made by one person. It isn't made by the JASP team or by the APA.
 
-![jAPAsp with the Album Sales example open](docs/screenshot.png)
+![Coralline with the Album Sales example open](docs/screenshot.png)
 
 ## Features
 
@@ -76,14 +81,15 @@ In the app:
 ## Use
 
 1. Save your work in JASP.
-2. Open the `.jasp` file in jAPAsp: drop it on the window, or click **Open JASP file**. You can also start it with a file: `japasp results.jasp`.
+2. Open the `.jasp` file in Coralline: drop it on the window, or click **Open JASP file**. You can also start it with a file: `coralline results.jasp`.
 3. Click **Copy APA table** on a table (or press <kbd>C</kbd>; <kbd>K</kbd> goes to the next table and <kbd>J</kbd> to the previous one), then paste it into your document.
 4. Replace what is highlighted in yellow (click the to-do under the table for what to write), then remove the yellow: in Word, **Home › Text Highlight Colour › No Colour**; in Google Docs, the highlighter, then **None**.
 
-To see a file's tables as JSON instead: `japasp --json results.jasp`.
+To see a file's tables as JSON instead: `coralline --json results.jasp`.
 
 ## Notes
 
+- Coralline was called jAPAsp up to version 0.1.0. Installing Coralline removes the old jAPAsp, and your settings move over.
 - Only what is saved in the file is shown. Save again in JASP and the app reloads the tables by itself.
 - Tables are numbered in the order they appear in the file, from the number set in the menu.
 - **Limitation:** means, *SD*s and similar values always keep the zero before the decimal point (0.45), as APA asks for statistics that can be greater than 1. For a variable that can't go above 1, such as a proportion from 0 to 1, APA's rule would also allow .45, but the app can't tell a variable's limits from the file. Remove those zeros by hand if you want them gone.

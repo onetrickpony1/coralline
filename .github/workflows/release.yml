@@ -22,12 +22,12 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '$0 ~ "^## " v "( |$)" { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section for $version"; exit 1; }
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "jAPAsp $version" --notes-file notes.md
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Coralline $version" --notes-file notes.md
           # The double-click installer, as a download (raw files open as text in a browser)
           gh release upload "$GITHUB_REF_NAME" install.cmd --clobber
           # The Mac one in a zip, which keeps it runnable (a plain download loses that)
-          chmod +x install.command && zip -X jAPAsp-install-mac.zip install.command
-          gh release upload "$GITHUB_REF_NAME" jAPAsp-install-mac.zip --clobber
+          chmod +x install.command && zip -X coralline-install-mac.zip install.command
+          gh release upload "$GITHUB_REF_NAME" coralline-install-mac.zip --clobber
 
   build:
     name: ${{ matrix.asset }}
@@ -39,16 +39,16 @@ jobs:
         include:
           - os: ubuntu-22.04   # the oldest supported Ubuntu, so the program runs on older distributions too
             target: x86_64-unknown-linux-gnu
-            asset: japasp-linux-x86_64.tar.gz
+            asset: coralline-linux-x86_64.tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset: japasp-windows-x86_64.zip
+            asset: coralline-windows-x86_64.zip
           - os: macos-latest
             target: aarch64-apple-darwin
-            asset: japasp-macos-aarch64.tar.gz
+            asset: coralline-macos-aarch64.tar.gz
           - os: macos-latest
             target: x86_64-apple-darwin
-            asset: japasp-macos-x86_64.tar.gz
+            asset: coralline-macos-x86_64.tar.gz
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,11 +62,11 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
       - name: Package (Linux, macOS)
         if: runner.os != 'Windows'
-        run: tar -czf ${{ matrix.asset }} -C src-tauri/target/${{ matrix.target }}/release japasp
+        run: tar -czf ${{ matrix.asset }} -C src-tauri/target/${{ matrix.target }}/release coralline
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path src-tauri/target/${{ matrix.target }}/release/japasp.exe -DestinationPath ${{ matrix.asset }}
+        run: Compress-Archive -Path src-tauri/target/${{ matrix.target }}/release/coralline.exe -DestinationPath ${{ matrix.asset }}
       - name: Add to the release
         shell: bash
         env:

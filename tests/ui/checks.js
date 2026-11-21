@@ -4,7 +4,7 @@
 	var expect = function (ok, what) { if (!ok) out.failures.push(what); };
 	var byName = {};
 	for (var name in window.FIXTURES) {
-		var groups = window.japasp.show(window.FIXTURES[name], name + ".jasp");
+		var groups = window.coralline.show(window.FIXTURES[name], name + ".jasp");
 		byName[name] = groups;
 		groups.forEach(function (g) {
 			g.items.forEach(function (item) {

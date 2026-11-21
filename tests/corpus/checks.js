@@ -48,7 +48,7 @@
 		var file = window.FIXTURES[name];
 		var groups;
 		try {
-			groups = window.japasp.build(file);
+			groups = window.coralline.build(file);
 		} catch (e) {
 			report.push({ file: name, analysis: "(whole file)", title: "", problems: ["build crashed: " + e] });
 			continue;

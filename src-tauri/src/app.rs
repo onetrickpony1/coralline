@@ -17,7 +17,7 @@ fn open_jasp(path: String) -> Result<jasp::JaspFile, String> {
     jasp::read_path(Path::new(&path)).map_err(|e| e.to_string())
 }
 
-/// Whether plots can be redrawn as APA figures here (JASP installed in a way jAPAsp can use)
+/// Whether plots can be redrawn as APA figures here (JASP installed in a way Coralline can use)
 #[tauri::command]
 fn figures_available() -> bool {
     crate::figures::available()
@@ -95,7 +95,7 @@ fn set_app_icon(variant: String, window: tauri::Window) -> Result<(), String> {
         desktop_entries(&variant).map_err(|e| format!("couldn't update the desktop entry: {e}"))?;
         // Wayland taskbars look the icon up once per app id, so the window switches to the id of the
         // entry with this colour's icon
-        let id = format!("japasp-{}", variant_name(&variant));
+        let id = format!("coralline-{}", variant_name(&variant));
         let target = window.clone();
         window
             .run_on_main_thread(move || {
@@ -153,12 +153,12 @@ mod windows_icon {
         }
     }
 
-    /// The .ico for this colour in %LOCALAPPDATA%\japasp\icons (shortcuts need a file to point at)
+    /// The .ico for this colour in %LOCALAPPDATA%\coralline\icons (shortcuts need a file to point at)
     fn icon_file(variant: &str) -> std::io::Result<PathBuf> {
         let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| std::io::Error::other("no LOCALAPPDATA"))?;
-        let dir = PathBuf::from(base).join("japasp").join("icons");
+        let dir = PathBuf::from(base).join("coralline").join("icons");
         std::fs::create_dir_all(&dir)?;
-        let file = dir.join(format!("japasp-{variant}.ico"));
+        let file = dir.join(format!("coralline-{variant}.ico"));
         super::write_if_changed(&file, ico(variant))?;
         Ok(file)
     }
@@ -195,8 +195,8 @@ mod windows_icon {
         let mut links = Vec::new();
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let roaming = PathBuf::from(appdata);
-            links.push(roaming.join(r"Microsoft\Windows\Start Menu\Programs\jAPAsp.lnk"));
-            links.push(roaming.join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\jAPAsp.lnk"));
+            links.push(roaming.join(r"Microsoft\Windows\Start Menu\Programs\Coralline.lnk"));
+            links.push(roaming.join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Coralline.lnk"));
         }
         links
     }
@@ -215,8 +215,8 @@ mod windows_icon {
     }
 }
 
-/// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (japasp-blue,
-/// -dark, -pink, -green, hidden from menus, matched by the window's app id), and the launcher entry japasp with
+/// Desktop entries, which is where Wayland taskbars find an app's icon: one per colour (coralline-blue,
+/// -dark, -pink, -green, hidden from menus, matched by the window's app id), and the launcher entry coralline with
 /// the current colour. Files are only rewritten when they change.
 #[cfg(target_os = "linux")]
 fn desktop_entries(variant: &str) -> std::io::Result<()> {
@@ -224,14 +224,14 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => PathBuf::from(std::env::var_os("HOME").ok_or_else(|| std::io::Error::other("no home folder"))?).join(".local/share"),
     };
-    let icons = data.join("japasp");
+    let icons = data.join("coralline");
     let apps = data.join("applications");
     std::fs::create_dir_all(&icons)?;
     std::fs::create_dir_all(&apps)?;
     let exe = std::env::current_exe()?;
     let entry = |id: &str, icon: &Path, hidden: bool| {
         format!(
-            "[Desktop Entry]\nType=Application\nName=jAPAsp\nComment=Copy JASP tables as APA 7 tables\nExec=\"{}\" %f\nIcon={}\nTerminal=false\nCategories=Education;Science;\nStartupWMClass={id}\n{}",
+            "[Desktop Entry]\nType=Application\nName=Coralline\nComment=Copy JASP tables as APA 7 tables\nExec=\"{}\" %f\nIcon={}\nTerminal=false\nCategories=Education;Science;\nStartupWMClass={id}\n{}",
             exe.display(),
             icon.display(),
             if hidden { "NoDisplay=true\n" } else { "" }
@@ -255,11 +255,11 @@ fn desktop_entries(variant: &str) -> std::io::Result<()> {
     for name in ["blue", "dark", "pink", "green"] {
         let icon = file_of(name);
         write_if_changed(&icon, icon_png(name))?;
-        let id = format!("japasp-{name}");
+        let id = format!("coralline-{name}");
         write_if_changed(&apps.join(format!("{id}.desktop")), entry(&id, &icon, true).as_bytes())?;
     }
     let current = file_of(variant_name(variant));
-    if write_if_changed(&apps.join("japasp.desktop"), entry("japasp", &current, false).as_bytes())? {
+    if write_if_changed(&apps.join("coralline.desktop"), entry("coralline", &current, false).as_bytes())? {
         refresh_app_menu();
     }
     Ok(())
@@ -339,8 +339,8 @@ fn open_link(url: String) -> Result<(), String> {
 
 fn allowed_link(url: &str) -> bool {
     url == "https://github.com/onetrickpony1"
-        || url == "https://github.com/onetrickpony1/jAPAsp/issues/new"
-        || (url.starts_with("https://github.com/onetrickpony1/jAPAsp/issues/new?")
+        || url == "https://github.com/onetrickpony1/coralline/issues/new"
+        || (url.starts_with("https://github.com/onetrickpony1/coralline/issues/new?")
             && url.chars().all(|c| c.is_ascii_graphic()))  // URL-encoded: no spaces, quotes are encoded too
 }
 
@@ -397,10 +397,10 @@ mod tests {
     #[test]
     fn only_the_apps_own_links_open() {
         assert!(super::allowed_link("https://github.com/onetrickpony1"));
-        assert!(super::allowed_link("https://github.com/onetrickpony1/jAPAsp/issues/new?template=feedback.yml&version=0.1.0&system=Linux+%28x86_64%29"));
+        assert!(super::allowed_link("https://github.com/onetrickpony1/coralline/issues/new?template=feedback.yml&version=0.1.0&system=Linux+%28x86_64%29"));
         assert!(!super::allowed_link("https://github.com/onetrickpony1/other"));
         assert!(!super::allowed_link("https://evil.example/?https://github.com/onetrickpony1"));
-        assert!(!super::allowed_link("https://github.com/onetrickpony1/jAPAsp/issues/new?x=\" a\""));
+        assert!(!super::allowed_link("https://github.com/onetrickpony1/coralline/issues/new?x=\" a\""));
         assert!(!super::allowed_link("file:///etc/passwd"));
     }
 
@@ -414,12 +414,14 @@ mod tests {
     }
 }
 
-/// Up to 0.1.0 the app was called japasp-tool. Its settings (theme, recent files) live in WebKit's storage, in a
-/// folder named after the app identifier, so that folder is moved to the new name once. On Linux the launcher
-/// entries and icons it wrote under the old name are removed (the app writes new ones under the new name).
+/// The app was called japasp-tool up to 0.1.0 and jAPAsp (command `japasp`) after that; it is now Coralline. Its
+/// settings (theme, recent files) live in WebKit's storage, in a folder named after the app identifier, so the newest
+/// old folder is moved to the new name once. On Linux the launcher entries and icons written under the old names
+/// are removed (the app writes new ones), and on Windows the old icon folder. The old figures cache is left to the
+/// system's cache clean-up. Keep this until most users have updated.
 fn move_old_name() {
-    const OLD: &str = "io.github.onetrickpony1.japasp-tool";
-    const NEW: &str = "io.github.onetrickpony1.japasp";
+    const OLD: [&str; 2] = ["io.github.onetrickpony1.japasp", "io.github.onetrickpony1.japasp-tool"];
+    const NEW: &str = "io.github.onetrickpony1.coralline";
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
     let mut bases: Vec<PathBuf> = Vec::new();
     match std::env::var_os("XDG_DATA_HOME") {
@@ -430,27 +432,39 @@ fn move_old_name() {
     bases.extend(std::env::var_os("APPDATA").map(PathBuf::from));
     bases.extend(home.iter().flat_map(|h| [h.join("Library/Application Support"), h.join("Library/WebKit"), h.join("Library/Caches")]));
     for base in &bases {
-        let (old, new) = (base.join(OLD), base.join(NEW));
-        if old.is_dir() && !new.exists() {
-            let _ = std::fs::rename(&old, &new);
+        let new = base.join(NEW);
+        for old in OLD.iter().map(|name| base.join(name)) {
+            if old.is_dir() && !new.exists() {
+                let _ = std::fs::rename(&old, &new);
+            }
         }
     }
     #[cfg(target_os = "linux")]
     if let Some(data) = bases.first() {
-        for name in ["japasp-tool", "japasp-tool-blue", "japasp-tool-dark", "japasp-tool-pink"] {
-            let entry = data.join("applications").join(format!("{name}.desktop"));
-            if std::fs::read_to_string(&entry).is_ok_and(|text| text.contains("Name=jAPAsp")) {
-                let _ = std::fs::remove_file(entry);
-            }
-        }
-        let icons = data.join("japasp-tool");
-        if let Ok(entries) = std::fs::read_dir(&icons) {
-            for icon in entries.flatten().map(|e| e.path()) {
-                if icon.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("icon-") && n.ends_with(".png")) {
-                    let _ = std::fs::remove_file(icon);
+        for name in ["japasp", "japasp-tool"] {
+            for variant in ["", "-blue", "-dark", "-pink", "-green"] {
+                let entry = data.join("applications").join(format!("{name}{variant}.desktop"));
+                if std::fs::read_to_string(&entry).is_ok_and(|text| text.contains("Name=jAPAsp")) {
+                    let _ = std::fs::remove_file(entry);
                 }
             }
-            let _ = std::fs::remove_dir(icons);  // only if nothing else is in it
+            let icons = data.join(name);
+            if let Ok(entries) = std::fs::read_dir(&icons) {
+                for icon in entries.flatten().map(|e| e.path()) {
+                    if icon.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("icon-") && n.ends_with(".png")) {
+                        let _ = std::fs::remove_file(icon);
+                    }
+                }
+                let _ = std::fs::remove_dir(icons);  // only if nothing else is in it (the installer keeps the program there)
+            }
+        }
+    }
+    #[cfg(windows)]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let icons = PathBuf::from(local).join("japasp").join("icons");
+        if icons.is_dir() && std::fs::read_dir(&icons).is_ok_and(|mut e| e.all(|f| f.is_ok_and(|f| f.file_name().to_string_lossy().ends_with(".ico")))) {
+            let _ = std::fs::remove_dir_all(&icons);
+            let _ = std::fs::remove_dir(icons.parent().unwrap());
         }
     }
 }

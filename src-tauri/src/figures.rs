@@ -13,7 +13,7 @@ const SCRIPTS: [(&str, &str); 4] = [
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("JASP isn't installed on this computer in a way jAPAsp can use yet (on Linux it needs JASP's Flatpak)")]
+    #[error("JASP isn't installed on this computer in a way Coralline can use yet (on Linux it needs JASP's Flatpak)")]
     NoJasp,
     #[error("{0}")]
     Io(#[from] std::io::Error),
@@ -25,7 +25,7 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-/// Where jAPAsp keeps its working files (the R scripts, a copy of jaspTools, the pictures)
+/// Where Coralline keeps its working files (the R scripts, a copy of jaspTools, the pictures)
 pub fn work_dir() -> PathBuf {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .filter(|d| !d.is_empty())
@@ -33,10 +33,10 @@ pub fn work_dir() -> PathBuf {
         .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .unwrap_or_else(std::env::temp_dir);
-    base.join("japasp").join("figures")
+    base.join("coralline").join("figures")
 }
 
-/// Whether this computer has a JASP that jAPAsp can redraw plots with
+/// Whether this computer has a JASP that Coralline can redraw plots with
 pub fn available() -> bool {
     runner().is_some()
 }
@@ -120,7 +120,7 @@ fn run_r(start: &[String], work: &Path, scripts: &Path, input: &Path, log: &Path
         if began.elapsed() > RUN_LIMIT {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(Error::R(format!("it took longer than {} minutes, so jAPAsp stopped it", RUN_LIMIT.as_secs() / 60)));
+            return Err(Error::R(format!("it took longer than {} minutes, so Coralline stopped it", RUN_LIMIT.as_secs() / 60)));
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     };
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn only_old_run_files_are_cleared() {
-        let dir = std::env::temp_dir().join(format!("japasp-leftovers-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("coralline-leftovers-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("out-1-0")).unwrap();
         std::fs::create_dir_all(dir.join("out")).unwrap();
         std::fs::create_dir_all(dir.join("rlib")).unwrap();

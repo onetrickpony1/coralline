@@ -1,7 +1,7 @@
-// jAPAsp: shows every table of a saved JASP file as an APA 7 table, with a copy button for each.
+// Coralline: shows every table of a saved JASP file as an APA 7 table, with a copy button for each.
 // The tables are drawn by JASP's own code (vendor/jasp), so they match what JASP shows, and the APA copy is
 // JASP's "Copy APA Table" code. In the app, Rust reads the file and puts the copy on the clipboard. In a plain
-// browser (for tests), a JSON dump from `japasp --json` can be opened instead.
+// browser (for tests), a JSON dump from `coralline --json` can be opened instead.
 (function () {
 	"use strict";
 
@@ -16,12 +16,12 @@
 	const settings = {
 		read: function (key, fallback) {
 			try {
-				const value = localStorage.getItem("japasp." + key);
+				const value = localStorage.getItem("coralline." + key) ?? localStorage.getItem("japasp." + key);  // saved before the rename
 				return value === null ? fallback : JSON.parse(value);
 			} catch (e) { return fallback; }
 		},
 		write: function (key, value) {
-			try { localStorage.setItem("japasp." + key, JSON.stringify(value)); } catch (e) { /* storage off */ }
+			try { localStorage.setItem("coralline." + key, JSON.stringify(value)); } catch (e) { /* storage off */ }
 		}
 	};
 
@@ -314,7 +314,7 @@
 		$id("searchWrap").hidden = false;
 		$id("fileName").textContent = state.name;
 		$id("fileName").title = state.path || state.name;
-		document.title = state.name ? state.name + " – jAPAsp" : "jAPAsp";
+		document.title = state.name ? state.name + " – Coralline" : "Coralline";
 		if (tauri && tauri.window && tauri.window.getCurrentWindow)
 			tauri.window.getCurrentWindow().setTitle(document.title).catch(function () {});
 		$id("tables").scrollTop = 0;
@@ -385,7 +385,7 @@
 			tables.appendChild(el("p", { class: "no-match", text: all.length === 0
 				? "This file has no analyses yet. Run them in JASP, save, and open the file again."
 				: plotsOnly === all.length
-					? "This file has " + plural(all.length, "analysis", "analyses") + ", but " + (all.length === 1 ? "it only makes" : "they only make") + " plots." + (figures.available ? " Its plots are below, as APA figures." : " jAPAsp turns results tables into APA tables.")
+					? "This file has " + plural(all.length, "analysis", "analyses") + ", but " + (all.length === 1 ? "it only makes" : "they only make") + " plots." + (figures.available ? " Its plots are below, as APA figures." : " Coralline turns results tables into APA tables.")
 					: "None of this file's tables has anything to copy." }));
 		}
 		updateProgress();
@@ -1371,7 +1371,7 @@
 
 	const links = {
 		profile: "https://github.com/onetrickpony1",
-		newIssue: "https://github.com/onetrickpony1/jAPAsp/issues/new"
+		newIssue: "https://github.com/onetrickpony1/coralline/issues/new"
 	};
 
 	// The app asks the system to open the page in the browser (only these GitHub pages); a plain browser opens a tab
@@ -1504,9 +1504,9 @@
 		$id("fileRule").hidden = true;
 		$id("startNumber").disabled = true;
 		$id("openButton").classList.add("primary");
-		document.title = "jAPAsp";
+		document.title = "Coralline";
 		if (tauri && tauri.window && tauri.window.getCurrentWindow)
-			tauri.window.getCurrentWindow().setTitle("jAPAsp").catch(function () {});
+			tauri.window.getCurrentWindow().setTitle("Coralline").catch(function () {});
 		drawRecent();
 		updateMenu();
 	}
@@ -1612,10 +1612,10 @@
 		$id("fileInput").click();
 	}
 
-	// Browser only: JSON dumps from `japasp --json`
+	// Browser only: JSON dumps from `coralline --json`
 	function openBrowserFile(file) {
 		if (!/\.json$/i.test(file.name)) {
-			toast("In a browser, open the JSON from `japasp --json FILE.jasp`. The app opens .jasp files directly.", true);
+			toast("In a browser, open the JSON from `coralline --json FILE.jasp`. The app opens .jasp files directly.", true);
 			return;
 		}
 		file.text().then(function (text) { state.path = null; show(JSON.parse(text), file.name); }).catch(function (e) { toast(String(e), true); });
@@ -1845,5 +1845,5 @@
 	updateMenu();
 	requestAnimationFrame(function () { requestAnimationFrame(function () { root.classList.add("started"); }); });
 
-	window.japasp = { build: build, show: show };
+	window.coralline = { build: build, show: show };
 })();

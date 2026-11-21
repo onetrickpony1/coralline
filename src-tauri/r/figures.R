@@ -1,4 +1,4 @@
-# jAPAsp figures: reruns every analysis in a .jasp file with JASP's own R and draws its plots as APA 7 figures.
+# Coralline figures: reruns every analysis in a .jasp file with JASP's own R and draws its plots as APA 7 figures.
 #   Rscript figures.R <file.jasp> <out folder> <work folder> [modules folder]
 # Writes <out>/figures.json (analyses, plots with their picture, size and facts) and <out>/rerun.json (the rerun's
 # results, so the caller can check them against the file's saved ones), plus one PNG per plot.

@@ -1,15 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "jAPAsp",
+  "productName": "Coralline",
   "version": "0.1.0",
-  "identifier": "io.github.onetrickpony1.japasp",
+  "identifier": "io.github.onetrickpony1.coralline",
   "build": {
     "frontendDist": "../ui"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      { "title": "jAPAsp", "width": 1180, "height": 820, "minWidth": 520, "minHeight": 400, "dragDropEnabled": true }
+      { "title": "Coralline", "width": 1180, "height": 820, "minWidth": 520, "minHeight": 400, "dragDropEnabled": true }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
@@ -20,7 +20,7 @@
     "targets": ["deb", "appimage", "rpm", "nsis", "msi", "dmg", "app"],
     "category": "Education",
     "shortDescription": "Copy JASP tables as APA 7 tables",
-    "longDescription": "jAPAsp opens a saved JASP file and turns every results table into an APA 7 table that you can paste into Word or Google Docs.",
+    "longDescription": "Coralline opens a saved JASP file and turns every results table into an APA 7 table that you can paste into Word or Google Docs.",
     "license": "AGPL-3.0-or-later",
     "fileAssociations": [
       { "ext": ["jasp"], "name": "JASP file", "role": "Viewer" }
