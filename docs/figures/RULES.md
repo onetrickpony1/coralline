@@ -153,7 +153,7 @@ These stay with the student: whether a figure is needed and doesn't repeat the t
 ## Owner decisions (2026-11-21)
 The owner chose the suggested answer for all eight questions:
 1. **Level labels:** Coralline puts category tick labels and legend words in title case itself. Coded levels (0/1) without value labels in the file become a to-do for the student.
-2. **Colour:** fix contrast only (D4). No added shapes or line styles.
+2. **Colour:** fix contrast (D4) with a palette that steps in lightness. With 1 to 3 groups, no added shapes or line styles. With 4 or more groups told apart by colour alone, where colour can't reach 3:1 for every pair, also add shapes (points) or line styles (lines) (decision updated 2026-11-22).
 3. **Panel labels:** add capital letters at each panel's top left, and describe the panels by letter in the note.
 4. **Leading zeros:** follow 6.36 (B7), not the Figure 7.2 sample.
 5. **Asterisks:** keep JASP's asterisks and add the probability note (A7).

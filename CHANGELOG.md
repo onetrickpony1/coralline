@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Features
+- **Panel letters.** A figure with several panels gets bold capital letters (A, B, C) at each panel's top left. On narrow panels the letter sits above the heading. Long headings wrap at their spaces, or after a hyphen they already have, and shrink to 7 pt before a word is ever split.
+- **Figure notes describe each panel**, the way the APA manual does: "Panel A: Strength. Panel B: Closeness." Headings keep the capitals JASP gave them. A heading that is only a symbol or a code, like "mu" or "Hu", gets a to-do in its place instead.
+- **Shapes for four or more groups.** Four or more groups whose colours can't be told apart also get their own point shape or line style.
+
+### Fixes
+- **Redrawn figures follow APA 7 more closely.** In a sample of 57 checked cases, about 30% fewer faults were left.
+- **Colours you can tell apart.** Groups whose colours sat too close together, or too pale on the white page, are stepped in lightness, so two or three groups reach 3:1 where they can. Each colour keeps its own hue, so a blue group stays blue. Pale bars, boxes and lines get a dark outline, and no group's fill is left near white. A figure's panels give a group the same colour in every panel. Colours that carry meaning, like traffic lights or risk-of-bias levels, stay as JASP drew them, and so does a figure whose legend is a panel of its own, so it always matches the plot.
+- **Leading zeros the APA way.** Values that can't exceed 1 lose their leading zero (.42): correlations, proportions, probabilities, reliability coefficients, rates, sensitivity and specificity, relative frequencies, autocorrelations and the probability shaded under a density. Values that can exceed 1 keep theirs.
+- **Tick and category labels fit.** Crowded ticks on side-by-side panels are thinned, and the gap between panels grows so their end labels no longer meet. Long category names wrap or are set at two heights. A short panel shows fewer ticks, and all labels on an axis use the same number of decimals.
+- **No gridlines or grey backgrounds**, as APA asks, on plots from other packages too.
+- **Confidence intervals in APA form** in figure text: 95% CI [.20, .45].
+- **Fonts.** Text drawn in a plot is set between 8 and 14 pt once printed, in most plots. Chinese and other text the main font can't draw uses an installed font that can. If none is installed, a to-do says which font to install. A legend too wide for the picture goes into two rows.
+- **Figures don't fail because of the styling.** If one styling step goes wrong, that part of the figure is left as JASP drew it, and **What changed** says so. The rest of the figure is still styled. Your JASP file is never changed. Network centrality plots and the meta-analysis traffic-light plot no longer fail with "invalid font type".
+
 ## 0.2.1 - 2026-11-21
 
 ### Fixes

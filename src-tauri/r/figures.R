@@ -104,6 +104,7 @@ for (i in seq_along(opts)) {
     if (h * k > maxh) { w <- w * maxh / (h * k); h <- maxh / k }   # too tall for a page with its title and note
     landscape <- w * k > portraitw + 0.01
     apaPanelIn <- w * k / cols   # read by thinBreaks (apastyle.R)
+    apaFigureIn <- c(w * k, h * k)   # the printed picture (apastyle.R: each panel of a JASP layout gets its own share)
     png <- sprintf("a%d-%d-%s.png", i, length(figures) + 1, substr(gsub("[^A-Za-z0-9_.-]", "_", fig$getUnique), 1, 80))
     q <- NULL
     drawn <- if (is.null(fig$obj)) {

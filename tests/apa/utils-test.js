@@ -468,6 +468,13 @@ function test_buildAPATable() {
 		footnotes: [ { symbol: "<em>Note.</em>", text: "Student's t-test." } ]
 	});
 	var lines = tTest.text.split("\n");
+	// APA 7, 7.14: abbreviation definitions come last in the general note, after N and JASP's own general notes
+	var ciTable = _apaRender({ title: "Descriptives - Score", schema: { fields: [
+			{ name: "v", title: "", type: "string" }, { name: "m", title: "Mean", type: "number", format: "dp:3" },
+			{ name: "l", title: "95% CI Lower", type: "number", format: "dp:3" }, { name: "u", title: "95% CI Upper", type: "number", format: "dp:3" }] },
+		data: [ { v: "Score", m: 1.5, l: 1.1, u: 1.9 } ], footnotes: [ { symbol: "<em>Note.</em>", text: "Scores were averaged." } ] });
+	var ciNote = ciTable.text.split("\n").filter(function (l) { return /^Note\./.test(l); })[0] || "";
+	t(/Scores were averaged\. CI = confidence interval\.$/.test(ciNote), true, "apa note order: definitions last in a table's general note");
 
 	t(tTest.html.indexOf("<b>Table 3</b>") !== -1, true, "apa: bold table number");
 	t(tTest.html.indexOf("<i>Independent Samples t Test <span") !== -1, true, "apa: italic title, t Test, placeholder asking for the variables");
@@ -545,7 +552,10 @@ function test_buildAPATable() {
 	t((b12.html.match(/<(p|div|table) [^>]*>/g) || []).every(function (tag) { return tag.indexOf(times) !== -1; }), true, "apa font: the number, title, note and table name Times New Roman");
 	t((b12.html.match(/<p [^>]*>/g) || []).every(function (tag) { return /font-size: 12pt/.test(tag); }), true, "apa font: number, title and note are 12 pt");
 	// Margins carry units: LibreOffice reads the unitless zeros in "margin: 6pt 0 0 0" as 6 pt
-	t(_apaMarginsHaveUnits(b12.html) && _apaMarginsHaveUnits(bTooWide.html) && /margin: 6pt 0pt 0pt 0pt/.test(b12.html) && /margin: 0pt;/.test(b12.html), true, "apa margins: every margin value has a unit");
+	t(_apaMarginsHaveUnits(b12.html) && _apaMarginsHaveUnits(bTooWide.html) && /margin: 0pt;/.test(b12.html), true, "apa margins: every margin value has a unit");
+	// APA 7, 2.21: the table's number, title and note are double-spaced, with no space added between paragraphs
+	var tableParas = b12.html.match(/<p [^>]*>/g) || [];
+	t(tableParas.length >= 3 && tableParas.every(function (p) { return /margin: 0pt; line-height: 200%/.test(p) && /font-size: 12pt/.test(p) && p.indexOf("Times New Roman") !== -1; }), true, "apa frame: table number, title and note double-spaced, Times New Roman 12 pt");
 	t(lines[0], "Table 3", "apa text: number line");
 	t(lines[1], "Independent Samples t Test [describe what was measured]", "apa text: title line with placeholder");
 	t(lines[2], "[Add heading]\tt\tdf\tp\tCohen's d", "apa text: heading row, placeholder when the variables are unknown");
@@ -1065,7 +1075,11 @@ function test_buildAPAFigure() {
 	t(huge.html.indexOf("Too wide even for a landscape page: make this figure smaller") !== -1 && huge.html.indexOf("width: 9.60in") !== -1, true, "figure: smaller-figure reminder in the copy, the figure keeps its size");
 	t(huge.changes.some(function (c) { return c.rule === "Page width" && /wider than a landscape page/.test(c.detail); }), true, "figure: the log says it is wider than a landscape page");
 	t(Math.abs(apaFigurePortraitWidth * 72 - apaPageTextWidth) < 0.001 && apaFigureLandscapeWidth === 9, true, "figure: page widths come from the table constants (A4 portrait, 9 in landscape)");
-	t(_apaMarginsHaveUnits(huge.html) && _apaMarginsHaveUnits(ci.html) && /margin: 6pt 0pt 0pt 0pt/.test(ci.html), true, "figure margins: every margin value has a unit");
+	t(_apaMarginsHaveUnits(huge.html) && _apaMarginsHaveUnits(ci.html), true, "figure margins: every margin value has a unit");
+	// APA 7, 2.21: number, title and note double-spaced; the picture's paragraph keeps its own spacing
+	var figParas = (ci.html.match(/<p [^>]*>[\s\S]*?<\/p>/g) || []);
+	t(figParas.filter(function (p) { return p.indexOf("<img") === -1; }).every(function (p) { return /margin: 0pt; line-height: 200%/.test(p); })
+		&& figParas.filter(function (p) { return p.indexOf("<img") !== -1; }).every(function (p) { return p.indexOf("line-height") === -1; }) && figParas.length === 4, true, "figure frame: number, title and note double-spaced, not the picture");
 	var figureTimes = "font-family: 'Times New Roman', Times, serif";
 	t((wide.html.match(/<(p|div) [^>]*>/g) || []).every(function (tag) { return tag.indexOf(figureTimes) !== -1 && /font-size: 12pt/.test(tag); }), true, "figure font: number, title, picture and note paragraphs name Times New Roman 12 pt");
 
@@ -1142,6 +1156,243 @@ function test_buildAPAFigure() {
 	t(empty.text.split("\n")[0], "Figure 1", "figure: empty lists written as {} still build");
 	t(_apaSuggestFigureTitle({ plots: { mainPlot: { x: "x1", y: "y1" } } }), "y1 by x1", "figure: a suggested title from named plots");
 	t(_apaFigureIntervalNote({ plotName: "descriptivesPlot", options: { descriptivePlotErrorBarType: "ci", descriptivePlotCiLevel: 0.9 }, facts: { plots: { a: { geoms: "GeomErrorbar" } } } }).text, "Error bars represent 90% confidence intervals.", "figure: interval note from named plots and a bare geom");
+
+	// Notes by plot kind (apaFigureKinds): lines, bands, colours and dots explained; no error-bar to-do for marks that aren't error bars
+	var priorPost = buildAPAFigure({ title: "", containerTitles: ["Inferential Plots", "CriticalRecall"], plotName: "ttestContainer_inferentialPlots_CriticalRecall_priorAndPosteriorPlot", analysisName: "TTestBayesianIndependentSamples", options: {},
+		facts: { panels: 4, plots: [{ geoms: ["GeomText"], text: ["\"BF[0]['-'] == 11.7107\"", "\"BF['-'][0] ==  0.0854\""], xHidden: true, yHidden: true },
+			{ geoms: ["GeomBar", "GeomText"], text: ["\"data | H0\"", "\"data | H-\""], xHidden: true, yHidden: true },
+			{ geoms: ["GeomText"], text: ["\"95% CI: [−0.294, −0.002]\"", "\"Median: −0.063\""], xHidden: true, yHidden: true },
+			{ geoms: ["GeomJaspLine", "GeomPoint", "GeomErrorbar", "GeomRangeFrame"], x: "paste(\"Effect Size\", ~delta)", y: "Density" }] }, variables: ["CriticalRecall"] }, 1);
+	t(note(priorPost).indexOf("The solid line shows the posterior distribution and the dashed line the prior distribution.") !== -1
+		&& note(priorPost).indexOf("The horizontal bar shows the 95% credible interval of the posterior.") !== -1
+		&& note(priorPost).indexOf("The pie chart shows the posterior probability of each hypothesis") !== -1, true, "figure kinds: prior and posterior lines, the credible interval from the image, the pie");
+	t(priorPost.todo.indexOf("say what the error bars show") + " | " + (note(priorPost).indexOf("confidence interval") !== -1), "-1 | false", "figure kinds: a Bayesian interval is a credible interval, with no error-bar to-do");
+	t(note(priorPost).indexOf("BF₀₋ = Bayes factor in favour of the null hypothesis over a negative effect; BF₋₀ = Bayes factor in favour of a negative effect over the null hypothesis; CI = credible interval.") !== -1, true, "figure abbreviations: signed Bayes factors from plotmath, and CI as a credible interval, in the order they appear");
+	t(priorPost.text.split("\n")[1], "Prior and Posterior Distributions of Effect Size δ for CriticalRecall", "figure titles: prior and posterior plots titled by kind, for their variable");
+
+	var pdf = buildAPAFigure({ title: "", containerTitles: ["Probability Density Function"], plotName: "plotPDF_pdfPlot", analysisName: "LDgaussianunivariate", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomFunction", "GeomArea", "GeomText", "GeomSegment", "GeomLinerange", "GeomJaspPoint", "GeomRangeFrame"], x: null, y: "Density", text: ["0.08"] }] } }, 1);
+	t(pdf.todo.indexOf("say what the error bars show") + " | " + (note(pdf).indexOf("The curve shows the probability density. The shaded area shows the probability of the chosen interval.") !== -1), "-1 | true", "figure kinds: a pdf plot's marker isn't an error bar; its curve and area are explained");
+	var acf = buildAPAFigure({ title: "Autocorrelation Function", plotName: "acfPlot", analysisName: "StationarityTimeSeries", options: { acfCi: true, acfCiLevel: 0.95 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomLinerange", "GeomRibbon", "GeomSegment"], x: "Lag", y: "ACF" }] } }, 1);
+	t(acf.todo.indexOf("say what the error bars show") + " | " + (note(acf).indexOf("The shaded band marks the 95% confidence bounds for zero autocorrelation.") !== -1) + " | " + (note(acf).indexOf("ACF = autocorrelation function") !== -1), "-1 | true | true", "figure kinds: ACF spikes aren't error bars; the band and ACF explained");
+	var chart = buildAPAFigure({ title: "", plotName: "controlCharts_plot", analysisName: "variablesChartsSubgroups", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomStep", "GeomLabel", "GeomJaspLine", "GeomJaspPoint"], x: "Time", y: "Sample Average", text: ["\"CL = −7.08\"", "\"LCL = −9.56\"", "\"UCL = −4.6\""] }] } }, 1);
+	t(note(chart).indexOf("The solid line shows the centre line and the dashed lines the control limits.") !== -1 && note(chart).indexOf("red") === -1
+		&& note(chart).indexOf("CL = centre line; LCL = lower control limit; UCL = upper control limit.") !== -1, true, "figure kinds: control limits explained, their abbreviations defined in order");
+	t(chart.text.split("\n")[1], "Control Chart of Sample Average", "figure titles: an untitled control chart is named by what it charts");
+	var refLine = buildAPAFigure({ title: "Weights", plotName: "weightsPlot", analysisName: "Something", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomHline"], x: "Index", y: "Weight" }] } }, 1);
+	t(refLine.todo.indexOf("say what the lines show") !== -1, true, "figure kinds: an unknown kind with a reference line asks what the lines show");
+	var barZero = buildAPAFigure({ title: "Means", plotName: "barPlot", analysisName: "Something", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBar", "GeomHline"], x: "Group", y: "Score" }] } }, 1);
+	t(barZero.todo.indexOf("say what the lines show"), -1, "figure kinds: a bar chart's zero line needs no explanation");
+	var aoq = buildAPAFigure({ title: "AOQ Curve", plotName: "singleContainer_aoqCurve", analysisName: "AnalyzeAttributePlan", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomLine", "GeomHline", "GeomText"], x: "Proportion Non-conforming", y: "AOQ", text: ["\"AOQL: 0.026\""] }] } }, 1);
+	t(aoq.todo.indexOf("say what the lines show") + " | " + (note(aoq).indexOf("AOQL = average outgoing quality limit") !== -1), "-1 | true", "figure abbreviations: AOQ and AOQL defined, the labelled line explained");
+	var scatter = buildAPAFigure({ title: "sales - adverts", plotName: "scatterPlots_sales - adverts", analysisName: "Descriptives",
+		options: { scatterPlotRegressionLine: true, scatterPlotRegressionLineType: "linear", scatterPlotRegressionLineCi: true, scatterPlotRegressionLineCiLevel: 0.9 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomJaspPoint", "GeomSmooth", "GeomRibbon", "GeomLine"], x: "adverts", y: "sales" }] }, variables: ["sales", "adverts"] }, 1);
+	t(note(scatter).indexOf("The line shows the least-squares regression fit.") !== -1 && note(scatter).indexOf("The shaded band shows the 90% confidence interval.") !== -1, true, "figure kinds: the regression line and its band at the option's level");
+	var ldQQ = buildAPAFigure({ title: "", plotName: "mleContainer_mleFitAssessment_qqplot", analysisName: "LDgamma", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomPoint"], x: "Theoretical", y: "Sample" }] } }, 1);
+	t(note(ldQQ).indexOf("if the data followed the fitted distribution") !== -1 && ldQQ.text.split("\n")[1] === "Q-Q Plot of the Fitted Distribution" && note(ldQQ).indexOf("Q-Q = quantile-quantile") !== -1, true, "figure kinds: a fitted-distribution Q-Q plot, its title and Q-Q defined");
+	var forest = buildAPAFigure({ title: "Forest Plot", plotName: "forestPlot", analysisName: "BayesianBinomialMetaAnalysis", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPolygon", "GeomPoint", "GeomSegment", "GeomText"], x: "Effect Size", y: null }] } }, 1);
+	t(note(forest).indexOf("horizontal lines its confidence interval. The diamond shows the pooled estimate and its credible interval.") !== -1 && forest.todo.indexOf("say what the y axis shows") === -1, true, "figure kinds: a Bayesian forest plot's study rows have confidence intervals, only the pooled estimate a credible one; no y title needed");
+	var heat = buildAPAFigure({ title: "Heatmap", plotName: "heatmaps", analysisName: "Correlation", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomTile", "GeomText"], x: "", y: null }] } }, 1);
+	t(heat.todo.indexOf("say what the y axis shows"), -1, "figure: a heatmap gets no y-axis to-do");
+	var robustBF = buildAPAFigure({ title: "", plotName: "ttestContainer_robustnessPlot", analysisName: "TTestBayesianOneSample", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomJaspLine"], x: "Cauchy prior width", y: "BF[1][0]", text: ["BF[\"+\"][0]", "max BF"] }] } }, 1);
+	t(note(robustBF).indexOf("BF₁₀ = Bayes factor in favour of the alternative hypothesis") !== -1 && note(robustBF).indexOf("BF₊₀ = Bayes factor in favour of a positive effect") !== -1 && note(robustBF).indexOf("BF = Bayes factor") !== -1, true, "figure abbreviations: BF₁₀ from BF[1][0], BF₊₀ from a quoted sign, and a plain BF");
+	var mcd = buildAPAFigure({ title: "McDonald's omega", plotName: "x", analysisName: "reliabilityUnidimensionalBayesian", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], x: "Item", y: "McDonald's omega" }] } }, 1);
+	t(/McDonald =/.test(mcd.text), false, "figure abbreviations: a name such as McDonald isn't an abbreviation");
+	var anovaWord = buildAPAFigure({ title: "", plotName: "x", analysisName: "msaGaugeRR", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBar"], x: "Source", y: "Percent", text: ["ANOVA"] }] } }, 1);
+	t(note(anovaWord).indexOf("ANOVA = analysis of variance") !== -1, true, "figure abbreviations: ANOVA defined");
+	var bayesCi = buildAPAFigure({ title: "drp", plotName: "x", analysisName: "TTestBayesianIndependentSamples", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomPoint"], y: "Mean (95% CI)" }] }, variables: ["drp"] }, 1);
+	t(note(bayesCi).indexOf("CI = credible interval") !== -1 && note(bayesCi).indexOf("confidence") === -1, true, "figure abbreviations: never CI = confidence interval in a Bayesian figure");
+
+	var order = buildAPAFigure({ title: "", plotName: "modelContainer_residualsQQPlot", analysisName: "RegressionLinear", options: { dependent: "sales" }, dataSampleSize: { n: 100 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomLine"], x: "Theoretical Quantiles", y: "Observed Quantiles" }] }, variables: [] }, 1);
+	t(/N = 100\. Q-Q = quantile-quantile\.$/.test(note(order)), true, "figure note order: the sample size before the definitions, which come last");
+	var learnBayes = buildAPAFigure({ title: "Posterior", plotName: "containerPlotsPosterior_plotsPosterior", analysisName: "LSbinomialestimation", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomLine"], x: "Population Proportion", y: "Density", text: ["95% CI"] }] } }, 1);
+	t(note(learnBayes).indexOf("CI = credible interval") !== -1, true, "figure abbreviations: Learn Bayes intervals are credible intervals");
+	var bainDesc = buildAPAFigure({ title: "", plotName: "bainContainer_descriptivesPlots_age", analysisName: "BainTTestBayesianOneSample", options: { credibleInterval: 0.95 }, facts: { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomJaspPoint", "GeomSegment"], x: null, y: "age" }] }, variables: ["age"] }, 1);
+	t(note(bainDesc).indexOf("Points show means; error bars represent 95% credible intervals.") !== -1, true, "figure kinds: Bain's descriptives plot shows credible intervals");
+	var bfpackPost = buildAPAFigure({ title: "Posterior Distribution", plotName: "bfpackContainer_posteriorPlotContainer_cor1", analysisName: "bfpackCorrelation", options: { ciLevel: 0.95 }, facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomErrorbar"], x: "cor1", y: "Density", text: ["BF0u"] }] } }, 1);
+	t(note(bfpackPost).indexOf("confidence") + " | " + bfpackPost.todo.indexOf("say what the error bars show"), "-1 | -1", "figure kinds: a BFpack posterior is Bayesian, its bar a credible interval");
+	var survBand = buildAPAFigure({ title: "Probability Plot", plotName: "probabilityPlot", analysisName: "ParametricSurvivalAnalysis", options: { probabilityPlotConfidenceInterval: true, probabilityPlotConfidenceIntervalLevel: 0.9 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomPoint", "GeomRibbon"], x: "Time", y: "Probability" }] } }, 1);
+	t(note(survBand).indexOf("each line shows a fitted distribution, and the shaded band its 90% confidence interval.") !== -1 && note(survBand).indexOf("diagonal") === -1, true, "figure kinds: a survival probability plot has fitted lines with bands, not a diagonal");
+
+	var bainProb = buildAPAFigure({ title: "Posterior Probabilities", plotName: "bainContainer_posteriorProbabilityPlot", analysisName: "BainAnovaBayesian", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomBar"], x: null, y: null }] } }, 1);
+	t(note(bainProb).indexOf("diagonal"), -1, "figure kinds: a posterior probability plot isn't a P-P plot");
+	var lambdaTrace = buildAPAFigure({ title: "Variable Trace", plotName: "variableTrace", analysisName: "mlRegressionRegularized", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomLine"], x: "Lambda", y: "Coefficient" }] } }, 1);
+	t(note(lambdaTrace).indexOf("chain"), -1, "figure kinds: a variable trace over lambda isn't an MCMC trace plot");
+	var survProb = buildAPAFigure({ title: "", plotName: "survivalProbabilityPlot_table1", analysisName: "ParametricSurvivalAnalysis", options: { predictionsConfidenceIntervalLevel: 0.95 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomLine", "GeomRibbon"], x: "Time", y: "Survival Probability" }] } }, 1);
+	t(note(survProb).indexOf("The line shows the estimated survival probability, and the shaded band its 95% confidence interval.") !== -1 && note(survProb).indexOf("diagonal") === -1, true, "figure kinds: a survival curve and its band, not a P-P plot");
+	var laney = buildAPAFigure({ title: "", plotName: "LaneyPPlot", analysisName: "attributesCharts", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomHline", "GeomStep", "GeomJaspLine", "GeomJaspPoint", "GeomLabel"], x: "Sample", y: "Proportion", text: ["\"CL = 0.2\""] }] } }, 1);
+	t(note(laney).indexOf("dashed lines the control limits") !== -1 && laney.todo.indexOf("say what the lines show") === -1, true, "figure kinds: a Laney p' chart is a control chart");
+	var bayesBand = buildAPAFigure({ title: "", plotName: "descriptivesContainer_containerDescriptivesPlots_x", analysisName: "AncovaBayesian", options: { descriptivesPlotCi: true, descriptivesPlotCiLevel: 0.95 },
+		facts: { panels: 1, plots: [{ geoms: ["GeomJaspPoint", "GeomSmooth"], x: "cov", y: "score" }] }, variables: ["cov", "score"] }, 1);
+	t(note(bayesBand).indexOf("confidence"), -1, "figure kinds: a Bayesian band is never a confidence interval");
+
+
+	// The notes critique (NOTES-CRITIQUE.md): each false claim, with facts like the corpus figure's
+	var fig = function (analysisName, plotName, plots, options, extra) { return buildAPAFigure(Object.assign({ title: "", plotName: plotName, analysisName: analysisName, options: options || {}, facts: { panels: plots.length, plots: plots } }, extra || {}), 1); };
+	var prophetPost = fig("Prophet", "prophetMainContainer_prophetParameterPlots_prophetParameterPlotMarginal_k", [{ geoms: ["GeomErrorbar", "GeomLine", "GeomRangeFrame"], x: "Growth Rate", y: "Density" }], { estimation: "mcmc", ciLevel: 0.95 });
+	t(note(prophetPost).indexOf("95% credible interval") !== -1 && note(prophetPost).indexOf("confidence") === -1, true, "critique 1: Prophet's posteriors have credible intervals");
+	t(_apaFigureIsBayesian({ analysisName: "LSgameofchance", plotName: "ciPlot" }), true, "critique 1: every Learn Bayes analysis is Bayesian");
+	var abRobust = fig("ABTestBayesian", "abTestRobustnessPlot", [{ geoms: ["GeomContourFilled", "GeomRangeFrame"], x: "mu[psi]", y: "sigma[psi]", fill: "BF[\"1\"][\"0\"]" }]);
+	t(note(abRobust).indexOf("Colours show the Bayes factor for each combination of prior mean and prior standard deviation.") !== -1 && note(abRobust).indexOf("line") === -1, true, "critique 2: the A/B test robustness plot is a contour map, not a line");
+	var abSeq = fig("ABTestBayesian", "abTestSequentialPlot", [{ geoms: ["GeomPolygon"], y: "Prior Probabilities", xHidden: true, yHidden: true }, { geoms: ["GeomPoint", "GeomText"], text: ["\"P(H+ | data) = 0.552\""], xHidden: true, yHidden: true }, { geoms: ["GeomLine", "GeomPoint", "GeomRangeFrame"], x: "n", y: "Posterior Probability" }]);
+	t(note(abSeq).indexOf("Lines show the posterior probability of each hypothesis as the data accumulate. The pie charts show the prior and posterior probabilities.") !== -1 && note(abSeq).indexOf("Bayes factor as") === -1, true, "critique 3: the A/B test sequential plot shows posterior probabilities and pies");
+	var pointPrior = fig("SummaryStatsGeneralBayesianTests", "priorsPlot_priorNullPlot", [{ geoms: ["GeomPoint", "GeomLinerange", "GeomBlank", "GeomRangeFrame"], x: "theta", y: "P(theta)" }]);
+	t(note(pointPrior).indexOf("curve") + " | " + (note(pointPrior).indexOf("marks a point mass: all the probability at one value") !== -1), "-1 | true", "critique 4: a point prior is a spike and a dot, no curve");
+	var tsq = fig("multivariateControlCharts", "tsqChart", [{ geoms: ["GeomSegment", "GeomVline", "GeomJaspLine", "GeomJaspPoint", "GeomLabel", "GeomText"], x: "Sample", y: "Hotelling T²", text: ["\"UCL = 7.595\"", "\"LCL = 0\"", "\"Training (Training)\"", "\"Test\""] }]);
+	t(note(tsq).indexOf("centre line") === -1 && note(tsq).indexOf("The vertical line separates the training and test samples.") !== -1, true, "critique 5: a Hotelling T² chart has no centre line");
+	var schoenfeld = fig("SemiParametricSurvivalAnalysis", "proportionalHazardsPlots_plot1", [{ geoms: ["GeomPolygon", "GeomJaspLine", "GeomJaspPoint", "GeomRangeFrame"], x: "Time", y: "Beta(t)" }]);
+	t(note(schoenfeld).indexOf("hazard") === -1 && note(schoenfeld).indexOf("scaled Schoenfeld residuals") !== -1 && note(schoenfeld).indexOf("shaded band its confidence interval") !== -1, true, "critique 6: the proportional-hazards check is Schoenfeld residuals, not a hazard");
+	var lda = fig("mlClassificationLda", "matrixPlot", [{ geoms: ["GeomText"], text: ["\"LD1\""], xHidden: true, yHidden: true }, { geoms: ["GeomJaspLine", "GeomRangeFrame"], y: "Density", yHidden: true }, { geoms: ["GeomJaspPoint", "GeomRangeFrame"], fill: "Type" }]);
+	t(note(lda).indexOf("regression") === -1 && note(lda).indexOf("density of each discriminant function by class") !== -1, true, "critique 7: the LDA matrix plot has no regression line");
+	var history = fig("Prophet", "historyPlot", [{ geoms: ["GeomLine", "GeomPoint", "GeomRangeFrame"], x: "timeSecond", y: "contNormal" }], { estimation: "mcmc" });
+	t(note(history).indexOf("The line and dots show the observed series.") !== -1 && note(history).indexOf("forecast") === -1, true, "critique 8: Prophet's history plot joins the observed points, no forecast");
+	var mlBubble = fig("ClassicalMetaAnalysisMultilevelMultivariate", "bubblePlot", [{ geoms: ["GeomBoxplot", "GeomJaspPoint", "GeomRangeFrame"], x: "time", y: "Effect Size" }]);
+	t(note(mlBubble).indexOf("whiskers") + " | " + note(mlBubble).indexOf("individual scores") + " | " + (mlBubble.todo.indexOf("say what the boxes show") !== -1), "-1 | -1 | true", "critique 9: a multilevel bubble plot's boxes aren't box plots, its dots are studies");
+	var ppFunnel = fig("ClassicalPredictionPerformance", "funnelTestPlots_E-UW", [{ geoms: ["GeomPolygon", "GeomPoint", "GeomLine", "GeomVline", "GeomRangeFrame"], x: "Effect Size", y: "Standard Error" }]);
+	t(note(ppFunnel).indexOf("heterogeneity") === -1 && ppFunnel.todo.indexOf("say what the lines and the shaded band show") !== -1, true, "critique 10: a prediction-performance funnel gets a to-do, not the pseudo-confidence funnel sentence");
+	var survPP = fig("ParametricSurvivalAnalysis", "probabilityPlot", [{ geoms: ["GeomRibbon", "GeomJaspLine", "GeomPoint", "GeomText", "GeomRug", "GeomRangeFrame"], x: "Time (log Scale)", y: "Failure Probability (Weibull Scale)" }], { probabilityPlotConfidenceInterval: true, probabilityPlotConfidenceIntervalLevel: 0.9 });
+	t(note(survPP).indexOf("diagonal") + " | " + note(survPP).indexOf("observed values") + " | " + (survPP.todo.indexOf("say what the tick marks along the x axis show") !== -1), "-1 | -1 | true", "critique 11: survival probability plot: fitted lines with bands, the ticks a to-do");
+	var bForest = fig("BayesianMetaAnalysisDeprecated", "forestContainer_forestPlotEffect", [{ geoms: ["GeomVline", "GeomErrorbar", "GeomPoint", "GeomRangeFrame", "GeomPolygon"], x: "paste(\"Effect Size\", ~mu)" }]);
+	t(note(bForest).indexOf("observed effect size and horizontal lines its confidence interval. The diamonds show the pooled estimates and their credible intervals.") !== -1, true, "critique 12: Bayesian forest rows are confidence intervals; the pooled diamonds credible, plural when there are several");
+	// The incomplete list
+	var bfpackPP = fig("bfpackCorrelation", "bfpackContainer_posteriorPlotContainer_cor1", [{ geoms: ["GeomText"], text: ["\"data | H0\""], xHidden: true, yHidden: true }, { geoms: ["GeomJaspLine", "GeomPoint", "GeomErrorbar", "GeomRangeFrame"], x: "ρ", y: "Density" }]);
+	t(note(bfpackPP).indexOf("dashed line the prior distribution") !== -1, true, "critique: a BFpack posterior is a jaspGraphs prior and posterior plot");
+	var relPost = fig("reliabilityUnidimensionalBayesian", "stateContainer_plotContainer_alpha", [{ geoms: ["GeomLine", "GeomErrorbar", "GeomText", "GeomRibbon", "GeomRangeFrame"], x: "\"Cronbach's\" ~ alpha", y: "Density" }], { posteriorPlotPriorDisplayed: true, posteriorPlotShaded: true });
+	t(note(relPost).indexOf("The dashed line shows the prior distribution.") !== -1 && relPost.todo.indexOf("say what the shaded area shows") !== -1, true, "critique: reliability posterior names its dashed prior and asks about the shaded area");
+	var spike = fig("RegressionLinearBayesian", "basreg_postDistContainer_contGamma", [{ geoms: ["GeomLine", "GeomText", "GeomErrorbar", "GeomRangeFrame"], x: "contGamma", y: "Density", text: ["\"0.728\"", "\"−0.1062\"", "\" 0.0578\""] }]);
+	t(note(spike).indexOf("The spike at zero shows the posterior probability that the predictor is excluded") !== -1, true, "critique: the spike at zero in a Bayesian regression posterior is explained");
+	var intercept = fig("RegressionLinearBayesian", "basreg_postDistContainer_Intercept", [{ geoms: ["GeomLine", "GeomErrorbar", "GeomText", "GeomRangeFrame"], x: "Intercept", y: "Density", text: ["\"−4.25e-01\"", "\"−9.06e-03\""] }]);
+	t(note(intercept).indexOf("spike"), -1, "critique: the intercept's posterior has no spike at zero");
+	var noFacts = buildAPAFigure({ title: "Bayes Factor Robustness Check", plotName: "ttestContainer_inferentialPlots_drp_robustnessPlot", analysisName: "TTestBayesianIndependentSamples", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomJaspLine"], x: null, y: null }] } }, 1);
+	t(note(noFacts).indexOf("prior widths") !== -1, true, "critique: a t test's robustness plot is over prior widths even without axis text");
+	var audit = fig("auditBayesianEvaluation", "evaluationContainer_plotPriorAndPosterior", [{ geoms: ["GeomLine", "GeomSegment", "GeomPoint", "GeomRangeFrame"], x: "Population Misstatement", y: "Density" }]);
+	t(audit.todo.indexOf("say which line is the prior and which the posterior") !== -1 && audit.todo.indexOf("say what the arrows or bars show") !== -1, true, "critique: non-jaspGraphs prior and posterior plots ask which line is which and what the segments show");
+	var benford = fig("auditClassicalBenfordsLaw", "benfordsLawContainer_robustnessPlot", [{ geoms: ["GeomPath", "GeomPoint", "GeomSegment", "GeomText"], x: "Dirichlet Prior Concentration", y: "BF[10]" }]);
+	t(note(benford).indexOf("prior settings") !== -1 && note(benford).indexOf("prior widths") === -1, true, "critique: Benford's robustness is over prior settings, not widths");
+	var cdfT = fig("LDbetaPrime", "plotCDF_cdfPlot", [{ geoms: ["GeomFunction", "GeomSegment", "GeomText", "GeomLinerange", "GeomJaspPoint", "GeomAbline"], y: "\"Probability\" ~ (X <= x)", colour: "Slope" }]);
+	t(note(cdfT).indexOf("their slopes show the density there") !== -1, true, "critique: the CDF's tangent lines are explained");
+	var qcProb = fig("processCapabilityStudies", "probabilityContainer_ProbabilityPlot", [{ geoms: ["GeomLine", "GeomJaspPoint"], x: "Measurement", y: "Percent" }]);
+	t(note(qcProb).indexOf("The dashed lines either side of it show its confidence bounds.") !== -1, true, "critique: the QC probability plot's confidence bounds are explained");
+	var ba = fig("blandAltman", "plotsBlandAltman_a - b", [{ geoms: ["GeomHline", "GeomRect", "GeomPoint"], x: "Mean of Measurements", y: "Difference of Measurements" }]);
+	t(note(ba).indexOf("Shaded bands show the confidence intervals of these lines.") !== -1, true, "critique: Bland-Altman's shaded bands are explained");
+	var bsts = fig("bayesianStateSpace", "bstsMainContainer_bstsControlPlots_bstsControlPlotThreshold", [{ geoms: ["GeomRibbon", "GeomLine", "GeomHline"], x: "Time", y: "Value" }]);
+	t(note(bsts).indexOf("The dashed lines mark the threshold.") !== -1, true, "critique: the bsts threshold lines are explained");
+	var classicFunnel = fig("FunnelPlot", "funnelPlotContainer_funnelPlot", [{ geoms: ["GeomPolygon", "GeomLine", "GeomJaspPoint", "GeomText"], x: "Effect Size", y: "Standard Error" }]);
+	t(classicFunnel.todo.indexOf("say what the funnels and the coloured bands show") !== -1, true, "critique: the funnel plot analysis asks about its funnels and power bands");
+	var qqRes = fig("Anova", "anovaContainer_assumptionsContainer_qqPlot", [{ geoms: ["GeomLine", "GeomJaspPoint"], x: "Theoretical Quantiles", y: "Standardized Residuals" }]);
+	t(note(qqRes).indexOf("if the residuals were normally distributed") !== -1, true, "critique: a residual Q-Q plot speaks of residuals");
+	var forestPI = fig("BayesianBinomialMetaAnalysis", "forestPlot", [{ geoms: ["GeomPoint", "GeomSegment", "GeomPolygon", "GeomText"], text: ["\"PI [−1.46, 3.21]\""], xHidden: true, yHidden: true }]);
+	t(note(forestPI).indexOf("The PI row shows the prediction interval.") !== -1 && forestPI.todo.indexOf("say what the second interval in each study row shows") !== -1, true, "critique: the forest plot's PI row explained, the second study interval a to-do");
+
+	// The recheck (NOTES-CRITIQUE.md, "Recheck")
+	var lbCond = fig("LSbinomialtesting", "containerSequentialTests_sequentialAnalysisPredictivePerformancePlot", [{ geoms: ["GeomLine", "GeomRangeFrame"], x: "Observation", y: "Conditional Probability" }]);
+	t(note(lbCond).indexOf("Bayes factor") + " | " + (note(lbCond).indexOf("conditional probability of the data under each hypothesis") !== -1), "-1 | true", "recheck A: a Learn Bayes sequential plot of probabilities isn't a Bayes factor");
+	var lbInterval = fig("LSbinomialestimation", "containerIterativeInterval_sequentialAnalysisIntervalEstimatePlot", [{ geoms: ["GeomLine", "GeomRangeFrame"], x: "Observation", y: "\"P(\" ~ {    0.25 <= theta} <= 0.75 ~ \")\"" }]);
+	t(note(lbInterval).indexOf("Bayes factor") + " | " + (lbInterval.todo.indexOf("say what the lines show") !== -1), "-1 | true", "recheck A: an interval-probability sequence gets a to-do");
+	var lbBF = fig("LSbinomialtesting", "containerSequentialTests_sequentialAnalysisPredictivePerformancePlot", [{ geoms: ["GeomLine"], x: "Observation", y: "\"BF\"[\"01\"]" }]);
+	t(note(lbBF).indexOf("The line shows the Bayes factor as the data accumulate.") !== -1, true, "recheck A: the Bayes factor sentence where the y axis is a Bayes factor");
+	var itemDropped = fig("reliabilityUnidimensionalBayesian", "stateContainer_plotContainerItem_alpha", [{ geoms: ["GeomDensityRidges", "GeomRangeFrame"], x: "\"Cronbach's\" ~ alpha", y: "Item Dropped" }], { posteriorPlotPriorDisplayed: true });
+	t(note(itemDropped).indexOf("dashed") + " | " + (note(itemDropped).indexOf("when that item is dropped") !== -1) + " | " + (itemDropped.todo.indexOf("say what the vertical marks on each curve show") !== -1), "-1 | true | true", "recheck B: item-dropped ridge plots get no prior sentence");
+	var groupedForest = fig("ForestPlot", "forestPlot", [{ geoms: ["GeomBoxplot", "GeomPolygon", "GeomText", "GeomSegment"], x: "", y: "", text: ["\"Author\""] }]);
+	t(note(groupedForest).indexOf("Boxes show the middle") + " | " + note(groupedForest).indexOf("Points show each study") + " | " + (groupedForest.todo.indexOf("say what the boxes show") !== -1 && groupedForest.todo.indexOf("say what the bars under the diamonds show") !== -1) + " | " + (note(groupedForest).indexOf("The diamonds show the pooled estimates") !== -1), "-1 | -1 | true | true", "recheck C: a grouped forest plot: no box-plot or study-row sentences, to-dos for boxes and bars, plural diamonds");
+	var gauge = fig("msaGaugeRR", "xBarChart_plot", [{ geoms: ["GeomStep", "GeomLabel", "GeomJaspLine", "GeomJaspPoint"], x: "Operator", y: "Sample Average", text: ["\"CL = 2\"", "\"UCL = 3\"", "\"LCL = 1\""] }]);
+	t(/\bred\b|green|blue/.test(note(gauge)), false, "recheck D and colours: control chart notes name no colours and no red points");
+	t(/\b(red|green|blue|grey|gray)\b/.test(note(tsq) + note(chart) + note(laney)), false, "recheck colours: notes describe lines by type, not colour");
+	var deprPost = fig("BayesianMetaAnalysisDeprecated", "postContainer_ES", [{ geoms: ["GeomText"], text: ["\"data | H0\"", "\"data | H1\""], xHidden: true, yHidden: true }, { geoms: ["GeomJaspLine", "GeomErrorbar", "GeomRangeFrame", "GeomArea"], x: "paste(\"Effect Size\", ~mu)", y: "Density", colour: "", linetype: "" }]);
+	t(note(deprPost).indexOf("The lines show the prior and posterior distributions.") !== -1 && note(deprPost).indexOf("The curve shows the posterior") === -1 && deprPost.todo.indexOf("say which posterior the horizontal bar belongs to") !== -1, true, "recheck: the deprecated meta-analysis posterior plot has several posteriors and a prior");
+
+	var forestNoFacts = buildAPAFigure({ title: "Forest Plot", plotName: "forestPlot", analysisName: "ForestPlot", options: {}, facts: null }, 1);
+	t(forestNoFacts.todo.indexOf("say what the rows, intervals and diamonds show") !== -1 && note(forestNoFacts).indexOf("Points show") === -1, true, "no facts: a forest plot gets a to-do, not an unsure sentence or no note");
+	var screeNoFacts = buildAPAFigure({ title: "Scree Plot", plotName: "modelContainer_scree", analysisName: "exploratoryFactorAnalysis", options: {}, facts: null }, 1);
+	t(screeNoFacts.todo.indexOf("say what the lines and marks show") !== -1, true, "no facts: any kind left with no note gets a general to-do");
+
+	var xmr = fig("processCapabilityStudies", "xmr_plot", [{ geoms: ["GeomStep", "GeomLine", "GeomLabel", "GeomJaspLine", "GeomJaspPoint"], x: "Sample", y: "Individual Value", text: ["\"LSL = 0\"", "\"Tar. = 6\"", "\"USL = 12\"", "\"CL = 7.08\"", "\"LCL = 1.49\"", "\"UCL = 12.67\""] }]);
+	t(note(xmr).indexOf("The labelled solid lines show the centre line, the specification limits and the target; the dashed lines show the control limits.") !== -1, true, "final: a control chart with specification limits names all its solid lines");
+	var mixNoFacts = buildAPAFigure({ title: "Probability Plot", plotName: "probabilityPlot", analysisName: "ParametricMixtureSurvivalAnalysis", options: {}, facts: null }, 1);
+	t(note(mixNoFacts).indexOf("diagonal") + " | " + (mixNoFacts.todo.indexOf("say what the dots, lines and bands show") !== -1), "-1 | true", "final: a mixture survival probability plot without facts gets a to-do, not the diagonal");
+	var qcAcfNoFacts = buildAPAFigure({ title: "Autocorrelation", plotName: "autocorrelationPlot_Yield", analysisName: "variablesChartsIndividuals", options: {}, facts: null }, 1);
+	t(note(qcAcfNoFacts).indexOf("Vertical lines") + " | " + (qcAcfNoFacts.todo.indexOf("say what the marks at each lag and the bounds show") !== -1), "-1 | true", "final: an autocorrelation plot without facts gets a to-do, not a guess at its marks");
+	var abNoFacts = buildAPAFigure({ title: "Robustness", plotName: "abTestRobustnessPlot", analysisName: "ABTestBayesian", options: {}, facts: null }, 1);
+	t(note(abNoFacts).indexOf("line") === -1 || note(abNoFacts).indexOf("[say what the lines and marks show]") !== -1, true, "final: the A/B robustness map without facts isn't called a line");
+
+	// Panels described by their letters in the general note, in the manual's form (APA 7, 7.26 and 7.28, Figures 7.18
+	// and 7.19): "Panel A: ... Panel B: ..."; headings only from the facts, in sentence case
+	var pt = { geoms: ["GeomPoint"], x: "Lambda", y: "z" };
+	var panelFig = function (facts, extra) { return buildAPAFigure(Object.assign({ title: "Centrality Plot", plotName: "centralityPlot", analysisName: "NetworkAnalysis", options: {}, facts: facts }, extra || {}), 1); };
+	var three = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C"], panelHeadings: ["Strength", "Betweenness", "Closeness"] });
+	t(note(three), "Note. Panel A: Strength. Panel B: Betweenness. Panel C: Closeness.", "panels: three headings, each panel by its letter");
+	var two = panelFig({ panels: 2, plots: [pt, pt], panelLetters: ["A", "B"], panelHeadings: ["a) Prior", "b) Posterior"] });
+	t(note(two), "Note. Panel A: Prior. Panel B: Posterior.", "panels: two headings, JASP's a) dropped");
+	var noHeads = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C"] });
+	t(note(noHeads) + " | " + (noHeads.todo.indexOf("describe what Panels A to C show") !== -1), "Note. [describe what Panels A to C show]. | true", "panels: no headings in the facts, a to-do instead of a guess");
+	var twoNoHeads = panelFig({ panels: 2, plots: [pt, pt], panelLetters: ["A", "B"] });
+	t(twoNoHeads.todo.indexOf("describe what Panels A and B show") !== -1, true, "panels: two letters without headings");
+	var someHeads = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C", "D"], panelHeadings: ["Strength", null, "", "Closeness"] });
+	t(note(someHeads) + " | " + (someHeads.todo.indexOf("describe what Panels B and C show") !== -1), "Note. Panel A: Strength. Panel B: [describe what this panel shows]. Panel C: [describe what this panel shows]. Panel D: Closeness. | true", "panels: the known headings stated, the others asked in letter order");
+	var gapHeads = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C", "D"], panelHeadings: ["x", "Strength", "x", "Closeness"] });
+	t(gapHeads.todo.indexOf("describe what Panels A and C show") !== -1, true, "panels: repeated headings don't tell panels apart");
+	var oneLeft = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B"], panelHeadings: ["Strength", ""] });
+	t(oneLeft.todo.indexOf("describe what Panel B shows") !== -1, true, "panels: one panel left, singular");
+	var odd = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C"], panelHeadings: ["Strength", "Betweenness"] });
+	t(note(odd).indexOf("Strength") + " | " + (odd.todo.indexOf("describe what Panels A to C show") !== -1), "-1 | true", "panels: headings that don't match the letters aren't used");
+	var single = panelFig({ panels: 1, plots: [pt], panelLetters: ["A"], panelHeadings: ["Strength"] });
+	t(/Panel/.test(single.text) + " | " + /Panel/.test(panelFig({ panels: 2, plots: [pt, pt] }).text), "false | false", "panels: no note for one letter or none (flipped or zoomed plots get no letters)");
+	var panelN = panelFig({ panels: 2, plots: [{ geoms: ["GeomPoint"], x: "Lambda", y: "BF" }, pt], panelLetters: ["A", "B"], panelHeadings: ["CI Width", "Posterior"] }, { dataSampleSize: { n: 120 } });
+	t(note(panelN), "Note. Panel A: CI Width. Panel B: Posterior. <i>N</i> = 120. BF = Bayes factor; CI = credible interval.".replace(/<\/?i>/g, ""), "panels: first in the note, then N, then the abbreviations (headings included)");
+	var panelLine = panelFig({ panels: 1, plots: [{ geoms: ["GeomPoint", "GeomHline"], x: "Lambda", y: "z" }], panelLetters: ["A", "B"], panelHeadings: ["Regression Line", "Residuals"] });
+	t(panelLine.todo.indexOf("say what the lines show") !== -1, true, "panels: a heading naming a line doesn't explain the line");
+	var sentence = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B"], panelHeadings: ["Prior Distribution of the Meta-Analysis Mean", "Posterior Distribution of the Between-Study Standard Deviation"],
+		panelHeadingsJasp: ["prior distribution of the meta-analysis mean", "posterior distribution of the between-study standard deviation"] });
+	t(note(sentence), "Note. Panel A: Prior distribution of the meta-analysis mean. Panel B: Posterior distribution of the between-study standard deviation.", "panels: words the tool capitalised go back to JASP's lower case");
+	var names = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C"], panelHeadings: ["Sales in the United States", "Effect Size by Cohen", "Scores on Monday"],
+		panelHeadingsJasp: ["sales in the United States", "effect size by Cohen", "scores on Monday"] });
+	t(note(names), "Note. Panel A: Sales in the United States. Panel B: Effect size by Cohen. Panel C: Scores on Monday.", "panels: proper names and weekdays JASP capitalised keep their capitals");
+	var noJasp = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B"], panelHeadings: ["Bayesian Pearson Correlation", "Cronbach's Alpha"] });
+	t(note(noJasp), "Note. Panel A: Bayesian Pearson Correlation. Panel B: Cronbach's Alpha.", "panels: without JASP's heading, the heading as drawn");
+	var symbols = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C"], panelHeadings: ["mu", "tau", "Hu"] });
+	t(note(symbols) + " | " + (symbols.todo.indexOf("describe what Panels A to C show") !== -1), "Note. [describe what Panels A to C show]. | true", "panels: symbols and codes as headings get a to-do");
+	var notNoun = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B"], panelHeadings: ["Excluding Hu and Hc", "Including Hu"] });
+	t(notNoun.todo.indexOf("describe what Panels A and B show") !== -1, true, "panels: a heading that isn't a noun phrase gets a to-do");
+	var mixed = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B"], panelHeadings: ["Strength", "mu"] });
+	t(note(mixed), "Note. Panel A: Strength. Panel B: [describe what this panel shows].", "panels: a usable heading kept beside a symbol's to-do");
+	var order = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B", "C"], panelHeadings: ["Strength", "tau", "Closeness"] });
+	t(note(order) + " | " + order.todo.filter(function (x) { return /Panel/.test(x); }).length, "Note. Panel A: Strength. Panel B: [describe what this panel shows]. Panel C: Closeness. | 1", "panels: a to-do in its letter's place, one entry in the to-do list");
+	var varName = panelFig({ panels: 1, plots: [pt], panelLetters: ["A", "B"], panelHeadings: ["Scores by Group", "Scores by Treatment"] }, { variables: ["Group", "Treatment"] });
+	t(note(varName), "Note. Panel A: Scores by Group. Panel B: Scores by Treatment.", "panels: variable names keep their case");
+
+	// Suggested titles from the plot kind, not misleading ones from the axes
+	var rmMeans = buildAPAFigure({ title: "", containerTitles: ["Descriptives Plots"], plotName: "rmAnovaContainer_descriptivesContainer_containerDescriptivesPlots_", analysisName: "AnovaRepeatedMeasures", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomErrorbar", "GeomLine", "GeomPoint"], x: "Entity", y: "" }] }, variables: ["Entity"] }, 1);
+	t(rmMeans.text.split("\n")[1], "Means by Entity", "figure titles: a means plot isn't a distribution");
+	var trace = buildAPAFigure({ title: "", containerTitles: ["Trace Plots"], plotName: "bfpackContainer_traceplotContainer_cor1", analysisName: "bfpackCorrelation", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomLine"], x: "Iterations", y: "x" }] } }, 1);
+	t(trace.text.split("\n")[1] + " | " + (note(trace).indexOf("Lines show the sampled values of each chain across iterations.") !== -1), "Trace Plot of cor1 | true", "figure titles: trace plots aren't distributions; each keeps its own name");
+	var pp = buildAPAFigure({ title: "", plotName: "mleContainer_mleFitAssessment_ppplot", analysisName: "LDbeta", options: {}, facts: { panels: 1, plots: [{ geoms: ["GeomJaspPoint", "abline2"], x: "Theoretical", y: "Sample" }] } }, 1);
+	t(pp.text.split("\n")[1] + " | " + (pp.todo.indexOf("say what the lines show") === -1), "P-P Plot of the Fitted Distribution | true", "figure titles: P-P plots named by kind, not 'Sample by Theoretical'");
+	t(_apaSuggestFigureTitle({ plots: [{ geoms: ["GeomJaspPoint"], x: "Theoretical", y: "Sample" }] }), null, "figure titles: theoretical against sample gets no axis title");
+	var month = buildAPAFigure({ title: "", containerTitles: ["Circular Descriptives Plots", "WindDirection"], plotName: "Plots_WindDirection_August", analysisName: "CircularStatisticsDescriptives", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomPoint", "GeomSegment", "GeomBar"], x: "", y: null, yHidden: true }] }, variables: ["WindDirection"] }, 1);
+	t(month.text.split("\n")[1].indexOf("August") !== -1, true, "figure titles: a panel's label from the plot name keeps neighbouring titles apart");
+	var binom = buildAPAFigure({ title: "", containerTitles: ["Inferential Plots", "contBinom - 0"], plotName: "inferentialPlots_contBinom - 0_contBinom0priorposterior", analysisName: "BinomialTestBayesian", options: {},
+		facts: { panels: 1, plots: [{ geoms: ["GeomJaspLine", "GeomPoint", "GeomErrorbar"], x: "paste(\"Population Proportion\", ~theta)", y: "Density" }] }, variables: ["contBinom"] }, 1);
+	t(binom.text.split("\n")[1], "Prior and Posterior Distributions of Population Proportion θ for contBinom - 0", "figure titles: a variable name isn't split, and the level stays in the title");
+	t(apaTidyLabel("Inferential Plots: contBinom - 0", true, ["contBinom"]).text, "Inferential plots: contBinom - 0", "apa: a known variable name isn't split at its capitals");
+	var postLine = _apaSuggestFigureTitle({ plots: [{ geoms: ["GeomLine", "GeomSegment"], x: "Population Misstatement", y: "Density" }] });
+	t(postLine, null, "figure titles: a density curve of a prior isn't 'Distribution of' the parameter");
+
+	// Title case in the frame: words after an opening bracket, both halves of hyphenated words, no markup
+	t(apaTitleCase("Heterogeneity (precision allocation)"), "Heterogeneity (Precision Allocation)", "apa: title case after an opening bracket");
+	t(apaTitleCase("Time (year)"), "Time (Year)", "apa: a bracketed word alone");
+	t(apaTitleCase("Log-logistic and log-normal fits"), "Log-Logistic and Log-Normal Fits", "apa: both halves of hyphenated words");
+	t(_apaStripMarkup("Distribution of *M* - <i>M</i><sub>Reference</sub>"), "Distribution of M - MReference", "apa: markdown and html dropped from a title");
+	var marked = buildAPAFigure({ title: "*r*: Skill-practice correlation<br>by study", plotName: "x", analysisName: "jasp_meta_r", options: {}, facts: null }, 1);
+	t(/[*<>]|&lt;/.test(marked.text.split("\n")[1]) + " | " + marked.text.split("\n")[1].replace(/ \[.*$/, ""), "false | r: Skill-Practice Correlation by Study", "figure titles: markup stripped, hyphenated halves capitalised");
 }
 
 function runAllUtilTests() {

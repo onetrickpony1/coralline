@@ -1040,6 +1040,9 @@ var apaLandscapePageWidth	= apaLandscapeTextWidth - 11;	// pt, 637
 // Pasted text is Times New Roman. Each paragraph and cell names it inline, as Google Docs drops styles from some wrappers.
 var apaFont			= "font-family: 'Times New Roman', Times, serif";
 var apaTextStyle	= apaFont + "; font-size: 12pt; font-weight: normal; font-style: normal";
+// The number, title and notes around a table or figure are double-spaced (APA 7, 2.21 and 7.14), with no extra space
+// between paragraphs: the double spacing makes the gaps. 200% is line-height 2 in a form Word reads too.
+var apaFrameParagraphStyle = "margin: 0pt; line-height: 200%";
 
 var _apaCanvas = null;
 function _apaTextWidth(text) {
@@ -1190,8 +1193,20 @@ function apaTitleCase(text) {
 		let afterBreak = i === 0 || /[:\u2013\u2014-]$/.test(previous) || previous === "-";
 		if (!afterBreak && apaTitleMinorWords.indexOf(word.toLowerCase()) !== -1 && /^[A-Za-z]+\.?$/.test(word))
 			return word.toLowerCase();
-		if (/^[a-zà-ÿ]+([-'\u2019][a-zà-ÿ]+)*[.,:;)]?$/.test(word))  // plain lower-case words only: leaves symbols, codes and names alone
-			return word.replace(/(^|-)([a-zà-ÿ])/g, function (all, dash, letter) { return dash + letter.toUpperCase(); });
+		// statistical symbols keep their case: "r: Skill-Practice Correlation", not "R:"
+		let core = word.replace(/^[("'\[]+|[)"'\].,:;]+$/g, "");
+		if (apaItalicSymbols.indexOf(core) !== -1 && core.length <= 2 && core === core.toLowerCase())
+			return word;
+		// plain lower-case words only, also after an opening bracket ("(group 1)" -> "(Group 1)"): leaves symbols, codes and names alone
+		if (/^[("'\u2018\u201C[]*[a-zà-ÿ]+([-'\u2019][a-zà-ÿ]+)*[.,:;)\]"'\u2019\u201D]*$/.test(word))
+			return word.replace(/^([("'\u2018\u201C[]*)([a-zà-ÿ])|(-)([a-zà-ÿ])/g, function (all, open, letter, dash, after) {
+				return dash ? dash + after.toUpperCase() : open + letter.toUpperCase();
+			});
+		// both halves of a hyphenated word whose first half is capitalised: "Log-normal" -> "Log-Normal"
+		if (/^[("'\u2018\u201C[]*[A-Z][a-zà-ÿ]*(-[a-zà-ÿ]+)+[.,:;)\]"'\u2019\u201D]*$/.test(word))
+			return word.replace(/-([a-zà-ÿ]+)/g, function (all, part) {
+				return "-" + (apaTitleMinorWords.indexOf(part) !== -1 ? part : part.charAt(0).toUpperCase() + part.slice(1));
+			});
 		return word;
 	}).join(" ");
 }
@@ -1350,15 +1365,65 @@ var apaAbbreviationMeanings = { "CI": "confidence interval", "RMSE": "root mean 
 	"RMSEA": "root mean square error of approximation", "CFI": "comparative fit index", "TLI": "Tucker-Lewis index",
 	"SRMR": "standardized root mean square residual", "ICC": "intraclass correlation coefficient", "OR": "odds ratio",
 	"MSE": "mean squared error", "IQR": "interquartile range", "MAD": "median absolute deviation", "BF₁₀": "Bayes factor in favour of the alternative hypothesis",
-	"BF₀₁": "Bayes factor in favour of the null hypothesis", "LL": "lower limit", "UL": "upper limit", "MS": "mean square", "SS": "sum of squares" };
+	"BF₀₁": "Bayes factor in favour of the null hypothesis", "LL": "lower limit", "UL": "upper limit", "MS": "mean square", "SS": "sum of squares",
+	// terms that plots print (quality control, time series, meta-analysis, machine learning)
+	"Q-Q": "quantile-quantile", "P-P": "probability-probability", "ANOVA": "analysis of variance", "CL": "centre line", "UCL": "upper control limit",
+	"LCL": "lower control limit", "AOQ": "average outgoing quality", "AOQL": "average outgoing quality limit", "ATI": "average total inspection",
+	"ASN": "average sample number", "LSL": "lower specification limit", "USL": "upper specification limit", "GRR": "gauge repeatability and reproducibility",
+	"EWMA": "exponentially weighted moving average", "CUSUM": "cumulative sum", "ACF": "autocorrelation function", "PACF": "partial autocorrelation function",
+	"MAPE": "mean absolute percentage error", "OOB": "out-of-bag", "ROC": "receiver operating characteristic", "AUC": "area under the curve",
+	"IRT": "item response theory", "GRM": "graded response model", "PET-PEESE": "precision-effect test and precision-effect estimate with standard errors",
+	"HDI": "highest density interval", "HPD": "highest posterior density", "RE": "random effects", "FE": "fixed effects",
+	"PET": "precision-effect test", "PEESE": "precision-effect estimate with standard errors", "BMA": "Bayesian model averaging", "MCMC": "Markov chain Monte Carlo", "LB": "lower bound", "UB": "upper bound" };
 
-function apaTidyLabel(text, isFirst) {
+// Figure-only meanings: the Bayes factors that plots write with signs or letters as subscripts (BF['+'][0] in plotmath),
+// and a plain BF. Not shared with tables, whose headers name their Bayes factors in full.
+var apaFigureAbbreviationMeanings = { "BF₊₀": "Bayes factor in favour of a positive effect over the null hypothesis",
+	"BF₀₊": "Bayes factor in favour of the null hypothesis over a positive effect", "BF₋₀": "Bayes factor in favour of a negative effect over the null hypothesis",
+	"BF₀₋": "Bayes factor in favour of the null hypothesis over a negative effect", "BF0u": "Bayes factor of the null hypothesis against the unconstrained hypothesis",
+	"BFu0": "Bayes factor of the unconstrained hypothesis against the null hypothesis", "BF": "Bayes factor", "SEM": "structural equation modelling" };
+
+function _apaFigureAbbreviationText(text) {
+	// Plot text with R's plotmath turned into what the reader sees: BF[1][0], BF["10"] and BF[10] -> BF₁₀, BF['+'][0] -> BF₊₀;
+	// other subscripts (BF[phantom() %in% ...]) leave a plain BF. Quotes and ~ (plotmath spacing) become spaces.
+	let sub = { "0": "₀", "1": "₁", "+": "₊", "-": "₋" };
+	let part = "\\[\\s*['\"]?([01+\\-]{1,2})['\"]?\\s*\\]";
+	return text.replace(new RegExp("BF\\s*" + part + "(?:\\s*" + part + ")?", "g"), function (all, a, b) {
+			return "BF" + (a + (b || "")).split("").map(function (ch) { return sub[ch]; }).join("");
+		})
+		.replace(/BF\s*\[[^\]]*\]/g, "BF ")
+		.replace(/[~"]/g, " ");
+}
+
+function _apaStripMarkup(text) {
+	// Markdown and HTML from ggtext labels ("*M*<sub>diff</sub>", "a<br>b") reduced to their text
+	return String(text).replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/&lt;br\s*\/?&gt;/gi, " ").replace(/&lt;\/?[a-z]+&gt;/gi, "")
+		.replace(/\*\*([^*]+)\*\*|\*([^*\s][^*]*)\*/g, function (all, bold, italic) { return bold || italic; }).replace(/\s{2,}/g, " ");
+}
+
+function apaTidyLabel(text, isFirst, keep) {
 	/**
 	 * Turns a variable-name style label into APA wording, one text piece at a time:
 	 * "exam_score" -> "Exam score", "FaceType" -> "Face type", "A:B" -> "A × B", "Food as Reward" -> "Food as reward",
 	 * "sales" -> "Sales". Abbreviations written in lower case without vowels ("drp") can't be guessed and are returned
-	 * in `unclear` so they can be highlighted.
+	 * in `unclear` so they can be highlighted. Names in `keep` (the data's variable names) are left exactly as written:
+	 * "contBinom" isn't split into "cont Binom".
 	 */
+	if (keep && keep.length > 0) {
+		let names = keep.filter(function (k) { return typeof k === "string" && k.length >= 2; }).sort(function (a, b) { return b.length - a.length; });
+		let held = [];
+		let marked = text;
+		for (let name of names)
+			marked = marked.replace(new RegExp("(^|[^\\p{L}\\p{N}_])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^\\p{L}\\p{N}_])", "gu"), function (all, before) {
+				held.push(name);
+				return before + "\uE000" + (held.length - 1) + "\uE001";
+			});
+		if (held.length > 0) {
+			let tidy = apaTidyLabel(marked, isFirst);
+			let restore = function (t) { return t.replace(/\uE000(\d+)\uE001/g, function (all, i) { return held[+i]; }); };
+			return { text: restore(tidy.text), unclear: tidy.unclear.map(restore) };
+		}
+	}
 	// Pairs and paths ("Revise – Exam", "Framing → Justification"): each side is a name of its own
 	let pair = text.split(/( [\u2013\u2192\u2194\u2b64\u2aeb|\u2223] )/);
 	if (pair.length > 1) {
@@ -2517,8 +2582,9 @@ function buildAPATable(tableElement, info, tableNumber) {
 			explained.push(abbreviation + " = " + meaning);
 	}
 	if (explained.length > 0) {
-		notes.general.unshift(_apaEscape(explained.join("; ")) + ".");
-		log.add(i18n("Abbreviations explained"), i18n("Abbreviations in the table are written out in the note, unless JASP's notes already do (APA 7, 7.14)."), [{ from: "", to: notes.general[0] }]);
+		// APA 7, 7.14: the definitions come last in the general note (only a copyright line may follow)
+		notes.general.push(_apaEscape(explained.join("; ")) + ".");
+		log.add(i18n("Abbreviations explained"), i18n("Abbreviations in the table are written out at the end of the general note, unless JASP's notes already do (APA 7, 7.14)."), [{ from: "", to: notes.general[notes.general.length - 1] }]);
 	}
 
 	// Sample size in the note, unless the table shows it
@@ -2583,12 +2649,12 @@ function buildAPATable(tableElement, info, tableNumber) {
 
 	// HTML version
 	let html = '<div style="' + apaTextStyle + ';">';
-	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><b>' + _apaEscape(i18n("Table")) + " " + tableNumber + "</b></p>";
-	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><i>' + titleHtml + "</i></p>";
+	html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';"><b>' + _apaEscape(i18n("Table")) + " " + tableNumber + "</b></p>";
+	html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';"><i>' + titleHtml + "</i></p>";
 	if (tooWide)
-		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide for a portrait page: put this table on a landscape page")) + "</p>";
+		html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide for a portrait page: put this table on a landscape page")) + "</p>";
 	if (tooWideForLandscape)
-		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide even for a landscape page: split this table in two")) + "</p>";
+		html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide even for a landscape page: split this table in two")) + "</p>";
 	html += table.outerHTML;  // APA uses a true minus sign (−.10); the plain text below keeps hyphens for spreadsheets
 	if (notes.general.length > 0 || notes.specific.length > 0) {
 		let parts = [];
@@ -2596,7 +2662,7 @@ function buildAPATable(tableElement, info, tableNumber) {
 			parts.push('<i>' + _apaEscape(noteLabel) + '</i> ' + notes.general.join(" "));
 		for (let note of notes.specific)
 			parts.push(note.symbol ? note.symbol + " " + note.text : note.text);
-		html += '<p style="margin: 6pt 0pt 0pt 0pt; ' + apaTextStyle + ';">' + parts.join("<br>") + "</p>";
+		html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';">' + parts.join("<br>") + "</p>";
 	}
 	html += "</div>";
 	html = html.replace(/ data-apa-todo="1"/g, "");
@@ -2664,6 +2730,420 @@ function _apaFigureInfo(info) {
 	return info;
 }
 
+// What a figure's lines, bands, colours and dots mean, by plot kind (APA 7, 7.27 to 7.28: everything that carries
+// meaning is explained in the legend or the note). Each kind is matched on the facts: the analysis, the plot's name
+// and the geoms it draws. A note states only what is certainly drawn: an element whose meaning isn't certain gets a
+// to-do instead (c.todo), as a false sentence is worse than a question. `explains` lists what the note covers, so the
+// general to-dos ("say what the error bars show", "say what the lines show") aren't asked again; `rug: false` drops
+// the generic tick-mark sentence where the ticks mean something else.
+// The context `c` holds: has(regex) for the geoms, options, bayes (a Bayesian figure), interval (the interval's name,
+// "credible interval" for Bayesian figures), level(keys...) (its level, from the image's own "95% CI" first, then the
+// first option of those keys that is a number), text (all text in the image), y (the y-axis titles), labels (the text
+// layers), legend (a colour or line-type legend is
+// drawn), analysis and name, and todo(text) (a to-do for the student). `noFacts` is the to-do for a kind whose note
+// would be empty only because JASP's own picture comes without facts; a sentence that depends on how the plot is drawn
+// (bars or lines, a map or a line) returns nothing without facts, so that to-do takes its place.
+var apaJaspGraphsPriorPosterior = /^(TTestBayesian|BinomialTestBayesian|CorrelationBayesian|SummaryStats|EquivalenceBayesian|ContingencyTablesBayesian|bfpack)/;
+var apaFigureKinds = [
+	{	// jaspGraphs' prior and posterior plot: dashed prior, solid posterior, dots at the tested value, the interval as a bar on top
+		name: /prior.?(and.?)?posterior|priorposterior|oddsRatioPlots|bfpackContainer_posteriorPlotContainer/i, when: function (c) { return !/oddsRatio/i.test(c.name) || c.bayes; }, explains: "bars lines bands",
+		note: function (c) {
+			let s = [];
+			let jaspGraphs = apaJaspGraphsPriorPosterior.test(c.analysis) && !/^SummaryStatsGeneral/.test(c.analysis);
+			if (c.has(/Line|Function|Density|Area/)) {
+				if (jaspGraphs)
+					s.push(i18n("The solid line shows the posterior distribution and the dashed line the prior distribution."));
+				else {
+					s.push(i18n("The lines show the prior and posterior distributions."));
+					if (!c.legend)
+						c.todo(i18n("say which line is the prior and which the posterior"));
+				}
+			}
+			if (jaspGraphs && c.has(/^Geom(Jasp)?Point$/))
+				s.push(i18n("Dots mark the height of both distributions at the value of the null hypothesis."));
+			if (c.has(/Errorbar/))
+				s.push(i18n("The horizontal bar shows the") + " " + c.level("ciLevel", "credibleIntervalLevel") + c.interval + " " + i18n("of the posterior") + ".");
+			if (!jaspGraphs && c.has(/Segment/))
+				c.todo(i18n("say what the arrows or bars show"));
+			if (/Equivalence/.test(c.analysis) && c.has(/Ribbon/))
+				s.push(i18n("The shaded area marks the equivalence region."));
+			if (/data \| H/.test(c.text))
+				s.push(i18n("The pie chart shows the posterior probability of each hypothesis, assuming equal prior odds."));
+			return s;
+		} },
+	{	// a map of the Bayes factor over two prior settings (the A/B test), or a line over one
+		name: /robustness/i, explains: "lines",
+		note: function (c) {
+			if (!c.facts && /^ABTest/.test(c.analysis))
+				return [];
+			if (c.has(/Contour|Tile|Raster/))
+				return i18n("Colours show the Bayes factor for each combination of prior mean and prior standard deviation.");
+			let widths = /width|scale/i.test(c.text) || /^(TTestBayesian|CorrelationBayesian|SummaryStatsTTest|SummaryStatsCorrelation)/.test(c.analysis);
+			return [widths ? i18n("The line shows the Bayes factor for a range of prior widths.") : i18n("The line shows the Bayes factor for a range of prior settings.")]
+				.concat(c.has(/^Geom(Jasp)?Point$/) ? [widths ? i18n("Dots mark the Bayes factor at selected prior widths.") : i18n("Dots mark the Bayes factor at selected prior settings.")] : []);
+		} },
+	{	name: /sequential/i, when: function (c) { return c.bayes; }, explains: "lines",
+		note: function (c) {
+			let y = c.y;
+			if (/Posterior Probabilit/i.test(c.text))
+				return [i18n("Lines show the posterior probability of each hypothesis as the data accumulate.")].concat(c.has(/Polygon/) ? [i18n("The pie charts show the prior and posterior probabilities.")] : []);
+			if (/Conditional Probabilit/i.test(y))
+				return i18n("Lines show the conditional probability of the data under each hypothesis as the data accumulate.");
+			if (/Joint Probabilit/i.test(y))
+				return i18n("Lines show the joint probability of the data and each hypothesis as the data accumulate.");
+			// the t tests' and correlations' sequential plots always chart the Bayes factor, also in JASP's own picture
+			if (/BF/.test(y) || (!y && /^(TTestBayesian|CorrelationBayesian|BinomialTestBayesian)/.test(c.analysis)))
+				return i18n("The line shows the Bayes factor as the data accumulate.");
+			c.todo(i18n("say what the lines show"));
+			return [];
+		} },
+	{	name: /trace ?plot|plotContainerTP|_samples$/i, explains: "lines",
+		note: function () { return i18n("Lines show the sampled values of each chain across iterations."); } },
+	{	// a point prior is drawn as a spike topped by a dot; continuous ones as a curve
+		analysis: /^SummaryStatsGeneralBayesianTests$/, name: /priorsPlot|posteriorsPlot|predictionsPlot/i, explains: "bars lines",
+		note: function (c) {
+			let s = [];
+			if (c.has(/Function|Line$|Density/))
+				s.push(/predictions/i.test(c.name) ? i18n("The curve shows the predicted distribution of the outcome.") : /posteriors/i.test(c.name) ? i18n("The curve shows the posterior distribution.") : i18n("The curve shows the prior distribution."));
+			if (c.has(/Linerange/))
+				s.push(i18n("A vertical line topped by a dot marks a point mass: all the probability at one value."));
+			else if (c.has(/Point/))
+				c.todo(i18n("say what the dots show"));
+			return s;
+		} },
+	{	// reliability with each item dropped: a ridge of posteriors, one per dropped item
+		analysis: /^reliability/, name: /plotContainerItem/i, explains: "lines",
+		note: function (c) { c.todo(i18n("say what the vertical marks on each curve show")); return i18n("Each curve shows the posterior distribution of the coefficient when that item is dropped; the curve labelled original uses all items."); } },
+	{	// the deprecated Bayesian meta-analysis draws several posteriors and a prior in one plot
+		analysis: /^BayesianMetaAnalysisDeprecated$/, name: /^postContainer/i, explains: "bars lines",
+		note: function (c) {
+			let s = [i18n("The lines show the prior and posterior distributions.")];
+			if (!c.legend)
+				c.todo(i18n("say which line is the prior and which each posterior"));
+			if (c.has(/Errorbar/))
+				c.todo(i18n("say which posterior the horizontal bar belongs to"));
+			if (c.has(/Area|Ribbon/))
+				c.todo(i18n("say what the shaded area shows"));
+			if (/data \| H/.test(c.text))
+				s.push(i18n("The pie chart shows the posterior probability of each hypothesis, assuming equal prior odds."));
+			return s;
+		} },
+	{	name: /posteriorPlot|postDist|ParameterPlotMarginal|posteriorPlots|stateContainer_plotContainer|^postContainer/i, when: function (c) { return c.bayes || /Prophet|reliability/.test(c.analysis); }, explains: "bars lines bands",
+		note: function (c) {
+			let s = [i18n("The curve shows the posterior distribution.")];
+			if (c.options.posteriorPlotPriorDisplayed === true)
+				s.push(i18n("The dashed line shows the prior distribution."));
+			let level = c.level("credibleInterval", "posteriorSummaryPlotCiLevel", "scaleCiLevel", "ciLevel");
+			if (c.has(/Errorbar/))
+				s.push(i18n("The horizontal bar shows the") + " " + level + c.interval + ".");
+			if (c.has(/Ribbon|Area/))
+				c.todo(i18n("say what the shaded area shows"));
+			// the spike is labelled with its probability beside the interval's two bounds; the intercept has none
+			if (/^RegressionLinearBayesian$/.test(c.analysis) && /postDist/.test(c.name) && !/Intercept$/.test(c.name) && c.labels.length >= 3)
+				s.push(i18n("The spike at zero shows the posterior probability that the predictor is excluded (its coefficient is zero)."));
+			return s;
+		} },
+	{	name: /bainContainer_descriptivesPlots/i, when: function (c) { return c.has(/Errorbar/); }, explains: "bars",
+		note: function (c) { return i18n("Points show means; error bars represent") + " " + c.level("credibleInterval") + c.interval + "s."; } },
+	{	name: /postSumPlot/i, explains: "bars",
+		note: function (c) { return i18n("Points show posterior means; error bars represent") + " " + c.level("posteriorSummaryPlotCiLevel", "credibleInterval") + c.interval + "s."; } },
+	{	// Q-Q and P-P plots: the diagonal is where the points fall if the reference distribution fits
+		name: /qq/i, explains: "lines",
+		note: function (c) {
+			if (/^LD/.test(c.analysis) || /compareContinuous/.test(c.analysis))
+				return i18n("The diagonal line shows where the points would fall if the data followed the fitted distribution.");
+			let residuals = /resid/i.test(c.name) || /Anova|Ancova|Regression|GeneralizedLinear|ARIMA|MixedModels/.test(c.analysis);
+			return residuals ? i18n("The diagonal line shows where the points would fall if the residuals were normally distributed.")
+				: i18n("The diagonal line shows where the points would fall if the scores were normally distributed.");
+		} },
+	{	// parametric survival: one fitted line per distribution, each with its band; the ticks aren't certain
+		analysis: /Survival/, name: /(^|_)probabilityPlot/i, explains: "lines bands", rug: false, noFacts: "say what the dots, lines and bands show",
+		note: function (c) {
+			if (!c.facts)
+				return [];
+			let s = [i18n("Dots show the nonparametric estimates of the failure probability; each line shows a fitted distribution") + (c.has(/Ribbon/) ? i18n(", and the shaded band its") + " " + c.level("probabilityPlotConfidenceIntervalLevel") + i18n("confidence interval") : "") + "."];
+			if (c.has(/Rug/))
+				c.todo(i18n("say what the tick marks along the x axis show"));
+			return s;
+		} },
+	{	name: /ppplot|_pp$|(^|_)probabilityPlot|probabilityContainer/i, explains: "lines",
+		note: function (c) {
+			return [i18n("The diagonal line shows where the points would fall if the data followed the fitted distribution.")]
+				.concat(/processCapability/.test(c.analysis) ? [i18n("The dashed lines either side of it show its confidence bounds.")] : []);
+		} },
+	{	// Hotelling's T² chart: control limits and a split between training and test samples, no centre line
+		name: /tsq/i, explains: "lines",
+		note: function (c) {
+			let s = [i18n("The dashed lines show the upper and lower control limits.")];
+			if (c.has(/Vline/) && /Training/.test(c.text))
+				s.push(i18n("The vertical line separates the training and test samples."));
+			return s;
+		} },
+	{	// Shewhart, CUSUM and EWMA charts of quality control: a solid centre line and dashed control limits. Notes
+		// name line types, not colours: the colours vary between charts and are lost in greyscale.
+		name: /chart|xBar|xmr|EWMAPlot|Laney[PU]Plot|IPlotA/i, when: function (c) { return !/traffic|autocorrelation|report/i.test(c.name) && (/\b(U|L)?CL\b/.test(c.text) || /Charts|msaGauge|msaTestRetest|rareEvent|processCapability|multivariateControl/.test(c.analysis)); }, explains: "lines",
+		note: function (c) {
+			if (/\bCL\b/.test(c.text) && /\b(USL|LSL|Target|Tar\.)/.test(c.text))
+				return i18n("The labelled solid lines show the centre line, the specification limits and the target; the dashed lines show the control limits.");
+			if (/\bCL\b/.test(c.text))
+				return i18n("The solid line shows the centre line and the dashed lines the control limits.");
+			if (/\bUCL\b/.test(c.text))
+				return i18n("The dashed lines show the control limits.");
+			c.todo(i18n("say what the lines show"));
+			return [];
+		} },
+	{	name: /acfPlot|pacfPlot|autocorrelationPlot/i, explains: "bars lines bands",
+		noFacts: "say what the marks at each lag and the bounds show",
+		note: function (c) {
+			if (!c.facts)
+				return [];  // bars or vertical lines, and a band or lines: only the drawing tells
+			let partial = /pacf/i.test(c.name);
+			let level = c.level(partial ? "pacfCiLevel" : "acfCiLevel", "residualAcfCiLevel");
+			let s = [(c.has(/Col|Bar/) ? i18n("Bars show the") : i18n("Vertical lines show the")) + " " + (partial ? i18n("partial autocorrelation") : i18n("autocorrelation")) + " " + i18n("at each lag.")];
+			if (c.has(/Ribbon/))
+				s.push(i18n("The shaded band marks the") + " " + level + i18n("confidence bounds for zero autocorrelation."));
+			else if (c.has(/Hline/))
+				s.push(i18n("The horizontal lines mark the") + " " + level + i18n("confidence bounds for zero autocorrelation."));
+			return s;
+		} },
+	// jaspDistributions: the chosen value or interval is marked on the curve; its marks aren't error bars
+	{	analysis: /^LD/, name: /plotPDF|pdfPlot/i, explains: "bars lines",
+		note: function (c) {
+			let s = [i18n("The curve shows the probability density.")];
+			if (c.has(/Area/))
+				s.push(i18n("The shaded area shows the probability of the chosen interval."));
+			if (c.has(/Linerange|Segment/))
+				s.push(i18n("The vertical line marks the density at the chosen value."));
+			return s;
+		} },
+	{	analysis: /^LD/, name: /plotCDF|cdfPlot/i, explains: "bars lines",
+		note: function (c) {
+			let s = [i18n("The curve shows the cumulative probability.")];
+			if (c.has(/Linerange|Segment/))
+				s.push(i18n("The dashed lines mark the chosen value and its cumulative probability."));
+			if (c.has(/Abline/))
+				s.push(i18n("The straight lines touch the curve at the chosen values; their slopes show the density there."));
+			return s;
+		} },
+	{	analysis: /^LD/, name: /plotQF|qfPlot/i, explains: "lines",
+		note: function () { return i18n("The curve shows the quantile for each cumulative probability."); } },
+	{	analysis: /^LD/, name: /plotPMF|pmfPlot/i, explains: "bars lines",
+		note: function () { return i18n("Bars show the probability of each value."); } },
+	{	analysis: /^LD/, name: /plotCMF|cmfPlot/i, explains: "bars lines",
+		note: function () { return i18n("Bars show the cumulative probability of each value."); } },
+	{	analysis: /^LD/, name: /estPDF/i, explains: "lines",
+		note: function () { return i18n("Bars show the distribution of the data and the curve the fitted distribution."); } },
+	{	analysis: /^LD/, name: /estPMF/i, explains: "lines",
+		note: function () { return i18n("Bars show the observed proportions and dots the fitted probabilities."); } },
+	{	analysis: /^LD/, name: /estCDF/i, explains: "lines",
+		note: function () { return i18n("The step line shows the cumulative distribution of the data and the curve the fitted distribution."); } },
+	{	analysis: /^LD/, name: /ecdf/i, explains: "lines",
+		note: function () { return i18n("The step line shows the cumulative distribution of the data."); } },
+	{	// Meta-analysis. In a Bayesian forest plot the study rows are the studies' own estimates with confidence
+		// intervals; only the pooled estimate is a posterior with a credible interval.
+		name: /forest/i, explains: "bars lines", noFacts: "say what the rows, intervals and diamonds show",
+		note: function (c) {
+			let s = [];
+			if (c.has(/Point|Errorbar/))
+				s.push(i18n("Points show each study's observed effect size and horizontal lines its") + " " + (c.bayes ? "" : c.level("confidenceIntervalsLevel", "ciLevel")) + i18n("confidence interval") + ".");
+			if (c.has(/Boxplot/))
+				c.todo(i18n("say what the boxes show"));
+			if (c.has(/Boxplot/) && c.has(/Segment/))
+				c.todo(i18n("say what the bars under the diamonds show"));
+			// several diamonds: the deprecated Bayesian meta-analysis (fixed, random, averaged) and grouped forest plots
+			let several = /^BayesianMetaAnalysisDeprecated$/.test(c.analysis) || c.has(/Boxplot/);
+			if (c.has(/Polygon|diamond/))
+				s.push(several ? i18n("The diamonds show the pooled estimates and their") + " " + c.interval + "s." : i18n("The diamond shows the pooled estimate and its") + " " + c.interval + ".");
+			if (c.has(/Vline/))
+				s.push(i18n("The vertical line marks no effect."));
+			if (/\bPI \[/.test(c.text))
+				s.push(i18n("The PI row shows the prediction interval."));
+			if (/^BayesianBinomialMetaAnalysis$/.test(c.analysis))
+				c.todo(i18n("say what the second interval in each study row shows"));
+			if (/PredictionPerformance/.test(c.analysis))
+				c.todo(i18n("say what the prediction interval row shows, if drawn"));
+			return s;
+		} },
+	{	// the prediction-performance funnels show an asymmetry test, not a pseudo-confidence funnel
+		analysis: /PredictionPerformance/, name: /funnel/i, explains: "lines bands",
+		note: function (c) { c.todo(i18n("say what the lines and the shaded band show")); return i18n("Each dot is a study."); } },
+	{	analysis: /^FunnelPlot$/, name: /funnel/i, explains: "lines bands",
+		note: function (c) { c.todo(i18n("say what the funnels and the coloured bands show")); return i18n("Each dot is a study."); } },
+	{	name: /funnel/i, explains: "lines",
+		note: function () { return i18n("Each dot is a study; the funnel's lines mark where studies would fall around the pooled estimate if there were no heterogeneity or publication bias."); } },
+	{	// multilevel models draw their moderator levels as boxes: what the boxes hold isn't certain
+		name: /bubble/i, when: function (c) { return c.has(/Boxplot/); }, explains: "bars lines bands",
+		note: function (c) { c.todo(i18n("say what the boxes show")); return i18n("Each dot is a study."); } },
+	{	name: /bubble/i, explains: "lines bands",
+		note: function (c) {
+			if (!c.facts && /Multilevel/.test(c.analysis))
+				return [];  // boxes or bubbles: only the drawing tells
+			let s = [i18n("Each bubble is a study, sized by its weight.")];
+			if (c.has(/Line/))
+				s.push(i18n("The line shows the meta-regression fit") + (c.has(/Polygon|Ribbon/) && c.options.bubblePlotConfidenceIntervals === true ? i18n(", and the shaded band its") + " " + c.level("confidenceIntervalsLevel") + c.interval : "") + ".");
+			return s;
+		} },
+	{	// the proportional-hazards check: scaled Schoenfeld residuals and their smoothed coefficient
+		analysis: /SurvivalAnalysis/, name: /proportionalHazards/i, when: function (c) { return /Beta/.test(c.text); }, explains: "lines bands",
+		note: function (c) {
+			return i18n("Dots show the scaled Schoenfeld residuals; the line shows the estimated coefficient over time") + (c.has(/Polygon|Ribbon/) ? i18n(", and the shaded band its confidence interval") : "") + ".";
+		} },
+	{	// Survival curves and their confidence bands
+		analysis: /SurvivalAnalysis/, name: /survival|hazardPlot|surivalPlot|restrictedMean/i, when: function (c) { return c.has(/Line|Step/) && !/proportionalHazards/i.test(c.name); }, explains: "lines bands",
+		note: function (c) {
+			let what = /cumulativeHazard/i.test(c.name) ? i18n("the estimated cumulative hazard") : /hazard/i.test(c.name) ? i18n("the estimated hazard")
+				: /restrictedMean/i.test(c.name) ? i18n("the restricted mean survival time") : /survivalTime/i.test(c.name) ? i18n("the estimated survival time") : i18n("the estimated survival probability");
+			let band = c.has(/Ribbon/) ? i18n(", and the shaded band its") + " " + c.level("predictionsConfidenceIntervalLevel", "plotCiLevel", "ciLevel") + c.interval : "";
+			return (c.has(/Step/) ? i18n("The step line shows") : i18n("The line shows")) + " " + what + band + ".";
+		} },
+	{	// Prophet's history plot: the observed series only
+		analysis: /^Prophet$/, name: /historyPlot/i, explains: "lines",
+		note: function () { return i18n("The line and dots show the observed series."); } },
+	{	// Time series and forecasts
+		name: /forecastPlot|OverallForecast|TrendForecast/i, explains: "lines bands",
+		note: function (c) {
+			let prophet = /Prophet/.test(c.analysis);
+			let s = prophet ? [i18n("Dots show the observed values and the line the model's fit and forecast.")] : [i18n("The line shows the observed series and the forecast.")];
+			if (c.has(/Ribbon/))
+				s.push(i18n("The shaded band shows the") + " " + c.level("predictionIntervalLevel", "forecastCiLevel") + i18n("prediction interval") + ".");
+			return s;
+		} },
+	{	analysis: /bayesianStateSpace/, name: /./, when: function (c) { return c.has(/Ribbon/); }, explains: "lines bands",
+		note: function (c) {
+			let s = [i18n("The line shows the posterior mean and the shaded band its") + " " + c.level("aggregatedStatesPlotCiLevel", "posteriorSummaryCiLevel") + c.interval + "."];
+			if (/Prediction/i.test(c.name) && c.has(/Vline/))
+				s.push(i18n("The vertical line marks the start of the forecast."));
+			if (/Threshold/i.test(c.name) && c.has(/Hline/))
+				s.push(i18n("The dashed lines mark the threshold."));
+			return s;
+		} },
+	{	// Machine learning
+		name: /roc(Curve|Plot)/i, explains: "lines",
+		note: function () { return i18n("The diagonal line shows the performance of a classifier that guesses at random."); } },
+	{	name: /predictedPerformance/i, explains: "lines",
+		note: function () { return i18n("The diagonal line shows where the points would fall if the predictions were exact."); } },
+	{	analysis: /^mlClassificationLda$/, name: /matrixPlot/i, explains: "lines",
+		note: function () { return i18n("Curves on the diagonal show the density of each discriminant function by class; dots show the cases, coloured by class."); } },
+	{	// Regression and correlation
+		name: /partialPlot/i, explains: "lines",
+		note: function () { return i18n("The line shows the least-squares regression fit."); } },
+	{	name: /corrPlot|matrixPlot|pairsPlot|scatterPlot|lagPlot/i, when: function (c) { return !/^ml/.test(c.analysis) && c.has(/Line|Smooth/) && c.has(/Point/); }, explains: "lines",
+		note: function (c) {
+			let s = [];
+			if (c.has(/Bar/) && /corrPlot|matrixPlot/i.test(c.name))
+				s.push(i18n("Panels on the diagonal show the distribution of each variable."));
+			let type = c.options.scatterPlotRegressionLineType || c.options.lagPlotRegressionType;
+			s.push(type === "smooth" ? i18n("The curve shows a smoothed (loess) fit.") : i18n("The line shows the least-squares regression fit."));
+			return s;
+		} },
+	{	name: /resid|glmPlot/i, when: function (c) { return c.has(/Smooth/); }, explains: "lines",
+		note: function () { return i18n("The curve shows the smoothed trend of the points."); } },
+	{	name: /pareto/i, when: function (c) { return c.has(/Line/); }, explains: "lines",
+		note: function () { return i18n("The line shows the cumulative percentage."); } },
+	{	analysis: /^Descriptives$/, name: /distributionPlots/i, when: function (c) { return c.has(/Line/); }, explains: "lines",
+		note: function () { return i18n("The curve shows a smoothed estimate of the distribution."); } },
+	{	name: /scree/i, explains: "lines",
+		note: function (c) { return c.has(/Hline/) ? i18n("The horizontal line marks an eigenvalue of 1.") : []; } },
+	{	name: /blandAltman/i, explains: "lines bands",
+		note: function (c) {
+			return [i18n("The horizontal lines show the mean difference and the limits of agreement.")].concat(c.has(/Rect/) ? [i18n("Shaded bands show the confidence intervals of these lines.")] : []);
+		} },
+	{	name: /aoqCurve/i, explains: "lines",
+		note: function (c) { return c.has(/Hline/) ? i18n("The horizontal line marks the average outgoing quality limit.") : []; } },
+	{	name: /capabilityPlot/i, explains: "lines",
+		note: function () { return i18n("Bars show the distribution of the measurements and the curves the fitted distributions; the vertical lines mark the specification limits and the target."); } },
+	{	analysis: /^processCapability/, name: /histogram/i, when: function (c) { return c.has(/Line/); }, explains: "lines",
+		note: function () { return i18n("The curve shows the fitted distribution."); } },
+	{	name: /equivalence\w*BoundsContainer/i, explains: "bars bands",
+		note: function (c) {
+			let alpha = typeof c.options.alpha === "number" ? c.options.alpha : null;
+			return [i18n("The shaded region marks the equivalence bounds."), i18n("The point shows the mean difference and the error bar its") + " " + (alpha !== null ? Math.round((1 - 2 * alpha) * 1000) / 10 + "% " : "") + c.interval + "."];
+		} },
+];
+
+function _apaFigureKind(info, geoms) {
+	/**
+	 * The note sentences for a figure from apaFigureKinds: { sentences, explains: { bars, lines, bands } }, or null when
+	 * no kind matches. `geoms` are the geoms the plot draws.
+	 */
+	let options = info.options || {};
+	let text = [];
+	for (let plot of ((info.facts && info.facts.plots) || []))
+		for (let key of ["x", "y", "colour", "fill", "text"])
+			text = text.concat(plot[key] || []);
+	text = text.filter(function (t) { return typeof t === "string"; }).join(" | ");
+	let bayes = _apaFigureIsBayesian(info);
+	let imageLevel = /(\d+(?:\.\d+)?)\s*%\s*(CI|HDI|credible|confidence)/i.exec(text);
+	let todos = [];
+	let legend = ((info.facts && info.facts.plots) || []).some(function (p) { return typeof p.colour === "string" || typeof p.linetype === "string"; });
+	let c = {
+		analysis: info.analysisName || "", name: info.plotName || "", options: options, text: text, bayes: bayes, legend: legend, facts: !!info.facts,
+		todo: function (what) { if (todos.indexOf(what) === -1) todos.push(what); },
+		y: ((info.facts && info.facts.plots) || []).map(function (p) { return typeof p.y === "string" ? p.y : ""; }).join(" | "),
+		labels: [].concat(...((info.facts && info.facts.plots) || []).map(function (p) { return [].concat(p.text || []); })),
+		has: function (re) { return geoms.some(function (g) { return re.test(g); }); },
+		interval: bayes ? i18n("credible interval") : i18n("confidence interval"),
+		level: function () {
+			if (imageLevel)
+				return imageLevel[1] + "% ";
+			for (let key of arguments)
+				if (typeof options[key] === "number")
+					return Math.round(options[key] * 1000) / 10 + "% ";
+			return "";
+		},
+	};
+	for (let kind of apaFigureKinds) {
+		if (kind.analysis && !kind.analysis.test(c.analysis))
+			continue;
+		if (!kind.name.test(c.name) || (kind.when && !kind.when(c)))
+			continue;
+		let sentences = [].concat(kind.note(c) || []);
+		// JASP's own picture (no facts): what the kind draws can't be checked, so a to-do instead of an empty note
+		if (!info.facts && sentences.length === 0 && todos.length === 0)
+			c.todo(kind.noFacts ? i18n(kind.noFacts) : i18n("say what the lines and marks show"));
+		return { sentences: sentences, todos: todos, rug: kind.rug !== false, explains: { bars: /bars/.test(kind.explains), lines: /lines/.test(kind.explains), bands: /bands/.test(kind.explains) } };
+	}
+	return null;
+}
+
+function _apaFigureIsBayesian(info) {
+	// A Bayesian analysis, or a plot that prints Bayes factors: its intervals are credible intervals
+	let text = [];
+	for (let plot of ((info.facts && info.facts.plots) || []))
+		for (let key of ["x", "y", "text"])
+			text = text.concat(plot[key] || []);
+	// Prophet estimates by MCMC (its "Credible interval level"), and every Learn Bayes analysis (LS...) is Bayesian
+	let mcmc = /^Prophet$/.test(info.analysisName || "") && (!info.options || info.options.estimation !== "map");
+	return mcmc || /Bayes|^bfpack|^Bain|^LS/i.test(info.analysisName || "") || /prior|posterior/i.test(info.plotName || "") || text.some(function (t) { return typeof t === "string" && /\bBF/.test(t); });
+}
+
+function _apaFigureUnexplained(info, explains, noteText) {
+	/**
+	 * To-dos for reference lines and bands that neither the plot kind nor the note explains: a horizontal, vertical or
+	 * diagonal line, a smoother, or a shaded band. Lines labelled in the image (AOQL, LSL, UCL) and the zero line of bar
+	 * charts need none; a filled density shape isn't a band.
+	 */
+	let todos = [];
+	if (!info.facts)
+		return todos;
+	let lines = false, bands = false;
+	for (let plot of (info.facts.plots || [])) {
+		let geoms = plot.geoms || [];
+		let labelled = [].concat(plot.text || []).some(function (t) { return typeof t === "string" && /\b(AOQL|LSL|USL|Target|U?CL|LCL|LSL)\b/.test(t); });
+		let bars = geoms.some(function (g) { return /^Geom(Bar|Col)$/.test(g); });
+		if (!labelled && geoms.some(function (g) { return /Vline|Abline|abline|Smooth/i.test(g) || (/Hline/.test(g) && !bars); }))
+			lines = true;
+		let density = /density/i.test(typeof plot.y === "string" ? plot.y : "") || geoms.some(function (g) { return /Violin|Density/.test(g); });
+		if (!density && geoms.some(function (g) { return /Ribbon/.test(g); }))
+			bands = true;
+	}
+	if (lines && !explains.lines && !/\b(lines?|curve)\b/i.test(noteText))
+		todos.push(i18n("say what the lines show"));
+	if (bands && !explains.bands && !/\b(band|shaded)\b/i.test(noteText))
+		todos.push(i18n("say what the shaded band shows"));
+	return todos;
+}
+
 // Error bars and bands: what they show comes from the analysis options, whether they are drawn from the plot itself
 // (facts: the plot's layers, from the external tool's rerun; without facts the options alone decide)
 function _apaFigureIntervalNote(info) {
@@ -2674,16 +3154,19 @@ function _apaFigureIntervalNote(info) {
 		geoms = geoms.concat(plot.geoms || []);
 	let known = !!info.facts;
 	let hasBox = geoms.some(function (g) { return /Boxplot/.test(g); });
+	// What this kind of plot draws (apaFigureKinds); its marks (a pdf plot's chosen value, an ACF plot's spikes) aren't error bars
+	let kind = _apaFigureKind(info, geoms);
+	let explains = kind ? kind.explains : { bars: false, lines: false, bands: false };
 	// a box plot's whiskers are drawn as error bars: the box sentence explains them
-	let hasBars = !hasBox && geoms.some(function (g) { return /Errorbar|Linerange|Pointrange|Crossbar/.test(g); });
+	let hasBars = !hasBox && !explains.bars && geoms.some(function (g) { return /Errorbar|Linerange|Pointrange|Crossbar/.test(g); });
 	let name = (info.plotName || "") + " " + (info.title || "");
 	// Bands: only where an option of this plot asks for one (marginalPlotCi for marginal plots, qqPlotCi for Q-Q
 	// plots); a density plot's filled shape is drawn as a ribbon too, and other plots' options don't count
 	let lowerName = (info.plotName || "").toLowerCase();
 	let ownOption = function (key) { let stem = key.replace(/[A-Z].*$/, "").toLowerCase(); return stem.length >= 2 && lowerName.indexOf(stem) !== -1; };
-	let bandCi = Object.keys(options).filter(function (k) { return /Ci$/.test(k) && options[k] === true && ownOption(k) && typeof options[k + "Level"] === "number"; });
+	let bandCi = Object.keys(options).filter(function (k) { return /(Ci|ConfidenceIntervals?)$/.test(k) && options[k] === true && ownOption(k) && typeof options[k + "Level"] === "number"; });
 	let bandPi = Object.keys(options).filter(function (k) { return /PredictionInterval$/.test(k) && options[k] === true && ownOption(k); });
-	let hasBand = geoms.some(function (g) { return /Ribbon|Smooth/.test(g); }) && bandCi.length > 0;
+	let hasBand = !explains.bands && geoms.some(function (g) { return /Ribbon|Smooth/.test(g); }) && bandCi.length > 0;
 	// Option families: bar plots, descriptives plots; their keys share a prefix (barPlotErrorBarType, descriptivePlotCiLevel)
 	let prefix = /bar ?plot/i.test(name) ? /^barPlot/ : /descripti/i.test(name) ? /^descriptives?Plot/ : null;
 	let pick = function (pattern) {
@@ -2694,7 +3177,8 @@ function _apaFigureIntervalNote(info) {
 	let type = pick(/(ErrorBarType|ErrorType)$/);
 	let switchedOff = pick(/(ErrorBars?|PlotCi)$/) === false;
 	let percent = function (x) { return typeof x === "number" ? Math.round(x * 1000) / 10 + "%" : "95%"; };
-	let bayes = /Bayes/i.test(info.analysisName || "");
+	let bayes = _apaFigureIsBayesian(info);
+	let intervalName = bayes ? i18n("credible interval") : i18n("confidence interval");
 	// Within-subjects bars: the paired t test always adjusts them (.summarySEwithin); RM ANOVA when this plot's own option says so
 	let normalize = /bar ?plot/i.test(name) ? options.normalizeErrorBarsBarplot : options.normalizeErrorBarsDescriptives;
 	let within = /^TTestPaired/.test(info.analysisName || "") || (normalize === true && /RepeatedMeasures/.test(info.analysisName || ""));
@@ -2703,7 +3187,8 @@ function _apaFigureIntervalNote(info) {
 	let errorBars = function (what) { return (pointMeans ? i18n("Points show means; error bars represent") : i18n("Error bars represent")) + " " + what + (within ? i18n(", adjusted for the within-subjects design") : "") + "."; };
 
 	let sentences = [];
-	if (hasBox) {
+	// (a bubble plot's boxes aren't a box plot of scores: its kind asks what they show)
+	if (hasBox && !/bubble|forest/i.test(info.plotName || "")) {
 		sentences.push(i18n("Boxes show the middle 50% of scores, with the median as a line; whiskers reach the most extreme scores within 1.5 times the box's length."));
 		if (geoms.some(function (g) { return /Violin|Density|Flat|Polygon/i.test(g); }))
 			sentences.push(i18n("The shaded shapes show the distribution of scores."));
@@ -2718,8 +3203,8 @@ function _apaFigureIntervalNote(info) {
 	// Lines that diagnostic and model plots draw, named from the plot (the same in JASP's own picture)
 	let plotName = info.plotName || "";
 	let dependent = typeof options.dependent === "string" && options.dependent ? options.dependent : null;
-	if (/qq/i.test(plotName))
-		sentences.push(i18n("The diagonal line shows where the points would fall if the scores were normally distributed."));
+	if (kind)
+		sentences = sentences.concat(kind.sentences);
 	if (/residualsVs(Pred|Dep|Cov)/i.test(plotName))
 		sentences.push(i18n("The horizontal line marks a residual of zero."));
 	if (/residualsVsHist/i.test(plotName))
@@ -2729,7 +3214,7 @@ function _apaFigureIntervalNote(info) {
 	if (/^TTestPaired/.test(info.analysisName || "") && /rain/i.test(plotName) && !/Difference/i.test(plotName) && geoms.some(function (g) { return /Line|Path|Segment/.test(g); }))
 		sentences.push(i18n("Lines join each participant's two scores."));
 	// rug marks (regression marginal plots): one tick per observed value along the axis
-	let rug = geoms.some(function (g) { return /Rug/.test(g); }) ? i18n("Tick marks along the x axis show the observed values.") : null;
+	let rug = (!kind || kind.rug) && geoms.some(function (g) { return /Rug/.test(g); }) ? i18n("Tick marks along the x axis show the observed values.") : null;
 	let joined = function (more) { return { text: sentences.concat(more ? [more] : [], rug ? [rug] : []).join(" ") }; };
 	// JASP's Descriptives interval plot: the mean with mean ± 1.96 standard errors
 	if (/IntervalPlot/.test(info.plotName || "") && /^Descriptives$/.test(info.analysisName || ""))
@@ -2743,21 +3228,23 @@ function _apaFigureIntervalNote(info) {
 		if (type === "ci" || (bayes && level !== undefined))
 			return joined(errorBars(percent(level) + " " + (bayes ? i18n("credible intervals") : i18n("confidence intervals"))));
 	}
+	// the sentences so far stay with a to-do
+	let withTodo = function (todo) { let r = sentences.length > 0 || rug ? joined() : {}; r.todo = todo; return r; };
 	if (hasBars)
-		return { todo: i18n("say what the error bars show") };
+		return withTodo(i18n("say what the error bars show"));
 	// JASP draws a confidence interval as a shaded band and a prediction interval as two dashed lines
 	let ci = bandCi.length === 1 ? percent(options[bandCi[0] + "Level"]) : null;
 	let pi = bandPi.length === 1 ? percent(options[bandPi[0] + "Level"]) : null;
 	if (known && pi && geoms.some(function (g) { return /Line/.test(g); })) {
 		if (hasBand && ci)
-			return joined(i18n("The shaded band shows the") + " " + ci + " " + i18n("confidence interval and the dashed lines the") + " " + pi + " " + i18n("prediction interval") + ".");
+			return joined(i18n("The shaded band shows the") + " " + ci + " " + intervalName + " " + i18n("and the dashed lines the") + " " + pi + " " + i18n("prediction interval") + ".");
 		if (!hasBand)
 			return joined(i18n("The dashed lines show the") + " " + pi + " " + i18n("prediction interval") + ".");
 	}
 	if (hasBand) {
 		if (ci && bandPi.length === 0)
-			return joined(i18n("The shaded band shows the") + " " + ci + " " + i18n("confidence interval") + ".");
-		return { todo: i18n("say what the shaded band shows") };
+			return joined(i18n("The shaded band shows the") + " " + ci + " " + intervalName + ".");
+		return withTodo(i18n("say what the shaded band shows"));
 	}
 	return sentences.length > 0 ? joined() : null;
 }
@@ -2766,7 +3253,18 @@ function _apaFigureIntervalNote(info) {
 const apaFigurePortraitWidth	= apaPageTextWidth / 72;
 const apaFigureLandscapeWidth	= apaLandscapeTextWidth / 72;
 
-function _apaSuggestFigureTitle(facts) {
+function _apaPlotmathText(text) {
+	// Simple plotmath as the reader sees it: 'paste("Effect Size", ~delta)' -> "Effect Size δ", '"Cronbach's" ~ alpha'
+	// -> "Cronbach's α". Null for anything with operators or subscripts, which only R can draw.
+	if (typeof text !== "string" || /\[|==|<=|>=|%|\^|\*|\bfrac\b|\{/.test(text))
+		return null;
+	let greek = { alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", eta: "η", theta: "θ", lambda: "λ", mu: "μ", rho: "ρ", sigma: "σ", tau: "τ", phi: "φ", omega: "ω" };
+	let out = text.replace(/\b(paste0?|italic|bold|plain)\s*\(/g, "(").replace(/[()",~]/g, " ")
+		.replace(/\b([a-z]+)\b/g, function (w) { return greek[w] || w; }).replace(/\s+/g, " ").trim();
+	return out || null;
+}
+
+function _apaSuggestFigureTitle(facts, info) {
 	/**
 	 * A figure title from what the plot draws: "Heart Rate by Group and Gender" (y by x and the legend), or
 	 * "Distribution of Sum Score" for histograms and densities. Null when the axes don't say enough.
@@ -2778,17 +3276,29 @@ function _apaSuggestFigureTitle(facts) {
 	let word = function (v) {
 		if (typeof v !== "string")
 			return null;
-		v = v.trim();
+		v = _apaStripMarkup(v).trim();
 		return v && !/[\[\]~"]|^\(?\w\)?$/.test(v) ? v : null;  // no plotmath, no lone symbols
 	};
 	let x = word(plot.x), y = word(plot.y);
 	let legend = word(plot.colour) || word(plot.fill) || word(plot.shape) || word(plot.linetype);
-	if (x && /^total$/i.test(x) && y)  // JASP's label when the scores aren't split into groups
+	let geoms = [];
+	for (let p of facts.plots)
+		geoms = geoms.concat(p.geoms || []);
+	let has = function (re) { return geoms.some(function (g) { return re.test(g); }); };
+	// "Distribution of" only where the plot draws a distribution: histograms, densities, box, violin and dot plots
+	let drawsDistribution = has(/Histogram|Density|Boxplot|Violin|Dotplot|Dots$/);
+	let countY = !!y && /^(density|counts?|frequency|proportion|percent(age)?)$/i.test(y);
+	if (x && /^total$/i.test(x) && y && (drawsDistribution || geoms.length === 0))  // JASP's label when the scores aren't split into groups
 		return apaTitleCase(i18n("Distribution of")) + " " + y;
 	// Axis titles are mostly variable names: they keep the student's own spelling, only the joining words change
-	if (x && (!y || /^(density|counts?|frequency|proportion|percent(age)?)$/i.test(y)))
+	if (x && ((countY && (geoms.length === 0 || has(/Bar|Col|Histogram|Density|Area|Ribbon|Dotplot|Dots$/))) || (!y && drawsDistribution)))
 		return apaTitleCase(i18n("Distribution of")) + " " + x;
-	if (!x || !y || /quantile|residual|fitted|predicted|index|observation/i.test(x + " " + y))
+	// a means plot whose y axis has no title (the repeated measures' levels): its points are means
+	if (x && !y && has(/Errorbar/) && has(/Point/) && info && /descripti/i.test(info.plotName || "")) {
+		let dependent = info && typeof (info.options || {}).dependent === "string" && info.options.dependent ? info.options.dependent : null;
+		return (dependent ? apaTitleCase(i18n("Mean")) + " " + dependent + " " + i18n("by") : apaTitleCase(i18n("Means by"))) + " " + x + (legend && legend !== x ? " " + i18n("and") + " " + legend : "");
+	}
+	if (!x || !y || countY || /quantile|residual|fitted|predicted|index|observation|theoretical|iteration/i.test(x + " " + y))
 		return null;  // diagnostic plots: their JASP title says it better
 	return y + " " + i18n("by") + " " + x + (legend && legend !== x && legend !== y ? " " + i18n("and") + " " + legend : "");
 }
@@ -2822,6 +3332,37 @@ function _apaFigureTitleFromKind(info) {
 	}
 	if (/IntervalPlot/.test(name) && variable)
 		return apaTitleCase(i18n("Mean of")) + " " + variable;
+	// Plots named by their kind; "for" the variable the container names, so neighbouring figures differ
+	let plot = info.facts && info.facts.plots && info.facts.plots[info.facts.plots.length - 1];
+	let containerVariable = (info.containerTitles || []).map(function (t) { return t.trim(); }).filter(function (t) { return variables.indexOf(t) !== -1 || variables.indexOf(t.split(" - ")[0]) !== -1 || /^\S+ - \S+$/.test(t); }).pop();
+	let forVariable = containerVariable ? " " + i18n("for") + " " + containerVariable : "";
+	let axisX = plot ? _apaPlotmathText(_apaStripMarkup(plot.x || "")) : null;
+	let axisY = plot ? _apaPlotmathText(_apaStripMarkup(plot.y || "")) : null;
+	if (/prior.?(and.?)?posterior|priorposterior/i.test(name) && plot && /Line|Function|Density|Area/.test((plot.geoms || []).join(" ")))
+		return apaTitleCase(i18n("Prior and posterior distributions")) + (axisX ? " " + i18n("of") + " " + axisX : "") + forVariable;
+	if (/robustness/i.test(name) && /Bayes|BF/i.test(analysis + " " + ((plot && plot.y) || "")))
+		return apaTitleCase(i18n("Bayes factor robustness check")) + forVariable;
+	if (/sequential/i.test(name) && /Bayes|BF/i.test(analysis + " " + ((plot && plot.y) || "")))
+		return apaTitleCase(i18n("Sequential analysis of the Bayes factor")) + forVariable;
+	if (/trace ?plot|plotContainerTP/i.test(name)) {
+		let what = axisY && axisY.length > 1 && !/^(x|y|value)$/i.test(axisY) ? axisY : last;
+		return apaTitleCase(i18n("Trace plot of")) + " " + what;
+	}
+	if (/ppplot|_pp$/i.test(name))
+		return apaTitleCase(i18n("P-P plot of the fitted distribution"));
+	if (/qq/i.test(name) && /^LD|compareContinuous/.test(analysis))
+		return apaTitleCase(i18n("Q-Q plot of the fitted distribution"));
+	if (/^LD/.test(analysis) && /estCDF/.test(name))
+		return apaTitleCase(i18n("Observed and fitted cumulative distributions"));
+	if (/^LD/.test(analysis) && /ecdf/.test(name))
+		return apaTitleCase(i18n("Cumulative distribution of the data"));
+	if (/^LD/.test(analysis) && /estPDF|estPMF/.test(name))
+		return apaTitleCase(i18n("Observed and fitted distributions"));
+	if (/probabilityContainer|ProbabilityPlot/.test(name) && /processCapability/.test(analysis))
+		return apaTitleCase(i18n("Probability plot of")) + " " + (axisX || i18n("the measurements"));
+	// control charts without a title of their own: what they chart
+	if (/chart/i.test(name) && !/traffic|report/i.test(name) && !(info.title || "").trim() && axisY && /Charts|msaGauge|msaTestRetest|rareEvent|processCapability/.test(analysis))
+		return apaTitleCase(i18n("Control chart of")) + " " + axisY;
 	// the matrix's own order (the analysis's variable list), not the sorted list of names in the file
 	let listed = (info.options || {}).variables;
 	listed = Array.isArray(listed) ? listed : listed && Array.isArray(listed.value) ? listed.value : variables;
@@ -2846,6 +3387,105 @@ function _apaFigureTitleFromKind(info) {
 	return null;
 }
 
+// Panels: a figure of several panels describes each by its letter in the general note, in the form of the manual's
+// multipanel figures (APA 7, 7.26 and 7.28, Figures 7.18 and 7.19): "Panel A: Strength. Panel B: Betweenness." The
+// letters are the ones the external tool drew (facts.panelLetters); a panel's heading is used only where the facts
+// give it (facts.panelHeadings, in the letters' order), in sentence case, and only when it reads as a description:
+// a symbol or code ("mu", "tau", "Hu") or a phrase that isn't a noun phrase ("Excluding Hu and Hc") gets a to-do,
+// as do panels without a heading. Nothing is made up.
+function _apaPanelList(letters) {
+	// "Panel B", "Panels A and B", "Panels A to D" (letters in a row), "Panels A, C, and D"
+	if (letters.length === 1)
+		return i18n("Panel") + " " + letters[0];
+	let inRow = letters.length > 2 && letters.every(function (l, k) { return k === 0 || l.charCodeAt(0) === letters[k - 1].charCodeAt(0) + 1; });
+	if (inRow)
+		return i18n("Panels") + " " + letters[0] + " " + i18n("to") + " " + letters[letters.length - 1];
+	if (letters.length === 2)
+		return i18n("Panels") + " " + letters[0] + " " + i18n("and") + " " + letters[1];
+	return i18n("Panels") + " " + letters.slice(0, -1).join(", ") + ", " + i18n("and") + " " + letters[letters.length - 1];
+}
+
+// A panel heading that names what the panel shows: not a symbol or a code, not a phrase that starts with a verb or a
+// preposition (the heading of a condition, "Excluding Hu and Hc", which says what was left out, not what is shown)
+function _apaPanelHeadingDescribes(h) {
+	let words = h.split(/\s+/).filter(function (w) { return w; });
+	if (!words.length)
+		return false;
+	let greek = /^(alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega)$/i;
+	// a code: one or two letters with digits or primes ("H1", "Hu", "x"), a Greek letter by name or sign, a lone number
+	let code = function (w) { w = w.replace(/[(),.:;]/g, ""); return !w || /^[A-Za-z\u0370-\u03ff]{1,2}[0-9'\u2080-\u2089]*$/.test(w) || greek.test(w) || /^[0-9.\-\u2212]+$/.test(w); };
+	if (words.every(function (w) { return code(w) || /^(and|or|of|vs\.?|versus|&)$/i.test(w); }))
+		return false;
+	if (/^(excluding|including|with|without|for|by|using|versus|vs\.?|and|or|of|in|at|to|from|given|when|if|after|before)$/i.test(words[0]))
+		return false;
+	return true;
+}
+
+// A heading in sentence case for the note: only the words the external tool itself capitalised are lowered. `jasp`
+// is the heading as JASP wrote it (facts.panelHeadingsJasp); a word JASP wrote in lower case and the tool showed
+// capitalised goes back to JASP's. Everything JASP capitalised (proper names, "United States", "Cohen", weekdays,
+// its own title case) stays as JASP wrote it. Without JASP's heading the heading is used as it is.
+function _apaPanelSentenceCase(h, jasp) {
+	if (typeof jasp !== "string" || !jasp)
+		return h;
+	jasp = _apaStripMarkup(jasp).replace(/^\(?[a-z]\)\s+/, "").replace(/\s+/g, " ").trim();
+	let shown = h.split(/(\s+|-)/), own = jasp.split(/(\s+|-)/);
+	if (shown.length !== own.length)
+		return h;
+	return shown.map(function (w, k) {
+		let o = own[k];
+		if (o === w)
+			return w;
+		if (o.length && o.charAt(0) === o.charAt(0).toLowerCase() && o.charAt(0) !== o.charAt(0).toUpperCase() && o.charAt(0).toUpperCase() + o.slice(1) === w)
+			return k === 0 ? w : o;
+		return w;
+	}).join("");
+}
+
+function _apaFigurePanelNote(facts) {
+	/**
+	 * @returns { html, todo, inline } for a figure with 2 or more panel letters, or null for a figure without letters.
+	 * html: "Panel A: ... Panel B: ..." in letter order, a to-do in place of each panel whose heading doesn't describe
+	 * it (inline: true), or "" when no heading does (the one to-do then covers every panel); todo: the to-do text for
+	 * the panels left, or null
+	 */
+	if (!facts)
+		return null;
+	let letters = _apaAsList(facts.panelLetters).filter(function (l) { return typeof l === "string" && /^[A-Z]$/.test(l); });
+	if (letters.length < 2 || letters.length !== _apaAsList(facts.panelLetters).length)
+		return null;
+	// headings only when there is one for every letter, in order; a blank or a repeated heading doesn't tell panels apart
+	let headings = _apaAsList(facts.panelHeadings);
+	if (headings.length !== letters.length)
+		headings = [];
+	let jasp = _apaAsList(facts.panelHeadingsJasp);
+	if (jasp.length !== letters.length)
+		jasp = [];
+	headings = headings.map(function (h) { return typeof h === "string" ? _apaStripMarkup(h).replace(/^\(?[a-z]\)\s+/, "").replace(/\s+/g, " ").trim() : ""; });
+	let parts = [], unknown = [];
+	letters.forEach(function (l, k) {
+		let h = headings[k] || "";
+		if (h && headings.indexOf(h) === k && headings.lastIndexOf(h) === k && _apaPanelHeadingDescribes(h)) {
+			let text = _apaPanelSentenceCase(h, jasp[k]);
+			parts.push({ letter: l, html: i18n("Panel") + " " + l + ": " + _apaEscape(text) + (/[.!?]$/.test(text) ? "" : ".") });
+		}
+		else {
+			unknown.push(l);
+			parts.push({ letter: l, html: null });
+		}
+	});
+	let todo = null;
+	if (unknown.length > 0)
+		todo = i18n("describe what") + " " + _apaPanelList(unknown) + " " + (unknown.length === 1 ? i18n("shows") : i18n("show"));
+	if (unknown.length === letters.length)
+		return { html: "", todo: todo, inline: false };
+	// in letter order: each panel left gets its own to-do in its place
+	let html = parts.map(function (p) {
+		return p.html || (i18n("Panel") + " " + p.letter + ": " + _apaTodo(i18n("describe what this panel shows")) + ".");
+	}).join(" ");
+	return { html: html, todo: todo, inline: unknown.length > 0 };
+}
+
 function buildAPAFigure(info, figureNumber) {
 	/**
 	 * Builds an APA 7 figure: "Figure N" in bold, the title in italic title case, the picture at a size where its
@@ -2861,23 +3501,29 @@ function buildAPAFigure(info, figureNumber) {
 	let todo = [];
 	let notes = [];
 
-	// Title: JASP's plot title, with the container's when the plot has none or only names a level ("Gender: Male")
-	let parts = (info.containerTitles || []).concat(info.title ? [info.title] : []).map(_apaPlain).filter(function (t) { return t.trim() !== ""; });
-	let raw = parts.join(": ");
-	let title = apaTitleCase(apaTidyLabel(raw, true).text).replace(/\bT-Test\b/g, "t Test");
-	let titleHtml = _apaEscape(title);
+	// Title: JASP's plot title, with the container's when the plot has none or only names a level ("Gender: Male").
+	// Markup from ggtext titles ("*M*<sub>diff</sub>") is dropped: the title is plain italic text.
+	let parts = (info.containerTitles || []).concat(info.title ? [info.title] : []).map(_apaStripMarkup).map(_apaPlain).filter(function (t) { return t.trim() !== ""; });
 	let variables = info.variables || [];
+	// A plot without a title of its own whose name ends in a label ("Plots_WindDirection_August"): the label tells it
+	// apart from its neighbours, so it joins the title
+	let lastName = (info.plotName || "").split("_").pop();
+	if (!(info.title || "").trim() && /^[A-Z][a-z]+( [A-Za-z0-9]+)*$/.test(lastName) && variables.indexOf(lastName) === -1 && parts.join(" ").indexOf(lastName) === -1)
+		parts.push(lastName);
+	let raw = parts.join(": ");
+	let title = apaTitleCase(apaTidyLabel(raw, true, variables).text).replace(/\bT-Test\b/g, "t Test");
+	let titleHtml = _apaEscape(title);
 	let namesVariable = variables.some(function (v) { return v && new RegExp("(^|\\W)" + v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\W|$)", "i").test(raw); });
 	// Titles made of JASP's section names around a variable ("Descriptives: Descriptives Plots: Mischief") say little:
 	// a title from the plot's axes says more, when there is one
 	let generic = /^(descriptives?( plots?)?|assumption checks|inferential plots|plots?|descriptives plots?|bar plots?|raincloud plots?|q-q plots?)$/i;
 	let meaningful = (info.containerTitles || []).concat(info.title ? [info.title] : []).map(_apaPlain).filter(function (t) { return t.trim() !== "" && !generic.test(t.trim()); });
 	let onlyNames = meaningful.length > 0 && meaningful.every(function (t) { return variables.indexOf(t.trim()) !== -1 || /^\S+ - \S+$/.test(t.trim()); });
-	if (namesVariable && onlyNames && (_apaFigureTitleFromKind(info) || _apaSuggestFigureTitle(info.facts)))
+	let suggested = _apaFigureTitleFromKind(info) || _apaSuggestFigureTitle(info.facts, info);
+	if (namesVariable && onlyNames && suggested)
 		namesVariable = false;
 	if (!namesVariable || raw.trim() === "") {
 		// A title from what the plot draws ("Heart Rate by Group and Gender"), for the student to check
-		let suggested = _apaFigureTitleFromKind(info) || _apaSuggestFigureTitle(info.facts);
 		if (suggested) {
 			titleHtml = _apaTodo(suggested).replace(/>\[|\]</g, function (m) { return m[0] === ">" ? ">" : "<"; });
 			todo.push(i18n("check the suggested title"));
@@ -2889,55 +3535,93 @@ function buildAPAFigure(info, figureNumber) {
 	}
 	log.add(i18n("Title"), i18n("Figure number in bold, then the title in italic title case on the next line, both above the figure. APA wants the title to say what the figure shows (APA 7, 7.24)."), [{ from: _apaEscape(raw), to: titleHtml }]);
 
-	// Note: what the error bars or bands show, then the sample size
+	// Note: what each panel shows, what the error bars, bands, lines and dots show, then the sample size, and the
+	// abbreviations last (APA 7, 7.28)
+	let panels = _apaFigurePanelNote(info.facts);
+	if (panels && panels.html) {
+		notes.push(panels.html);
+		log.add(i18n("Panels"), i18n("The note describes each panel by its letter, as APA asks for figures of several panels (APA 7, 7.26 and 7.28)."), [{ from: "", to: panels.html }]);
+	}
+	if (panels && panels.todo) {
+		if (!panels.inline)
+			notes.push(_apaTodo(panels.todo) + ".");
+		todo.push(panels.todo);
+	}
 	let interval = _apaFigureIntervalNote(info);
 	if (interval && interval.text) {
 		notes.push(interval.text);
-		log.add(i18n("Error bars"), i18n("The note says what the error bars or bands show, as APA asks (APA 7, 7.28)."), [{ from: "", to: interval.text }]);
+		log.add(i18n("Error bars"), i18n("The note says what the error bars, bands and lines show, as APA asks (APA 7, 7.28)."), [{ from: "", to: interval.text }]);
 	}
-	else if (interval && interval.todo) {
+	if (interval && interval.todo) {
 		notes.push(_apaTodo(interval.todo) + ".");
 		todo.push(interval.todo);
 	}
-	// The one-sample t test's descriptives and bar plots draw the test value as a dashed line
+	// The one-sample t tests' descriptives, bar and raincloud plots draw the test value as a dashed line
 	let options = info.options || {};
-	if (/^TTestOneSample/.test(info.analysisName || "") && /descripti|barPlot/i.test(info.plotName || "") && typeof options.testValue === "number")
+	let allGeoms = [];
+	for (let plot of ((info.facts && info.facts.plots) || []))
+		allGeoms = allGeoms.concat(plot.geoms || []);
+	if (/^TTest(Bayesian)?OneSample/.test(info.analysisName || "") && /descripti|barPlot|RainCloud/i.test(info.plotName || "") && typeof options.testValue === "number"
+		&& (!info.facts || allGeoms.some(function (g) { return /Hline/.test(g); }) || /descripti|barPlot/i.test(info.plotName || "")))
 		notes.push(i18n("The dashed line shows the test value of") + " " + options.testValue + ".");
-	// A plot of data whose y axis has no title (the paired t test's plots): the note says what it shows
+	// Reference lines and bands that no sentence explains: only the student knows what they show
+	let kind = _apaFigureKind(info, allGeoms);
+	for (let what of (kind ? kind.todos : [])) {
+		notes.push(_apaTodo(what) + ".");
+		todo.push(what);
+	}
+	// (panel headings don't explain lines: "Panel A shows Regression Line" says nothing about what the line means)
+	let unexplained = _apaFigureUnexplained(info, kind ? kind.explains : {}, _apaPlain(notes.filter(function (n) { return !panels || n !== panels.html; }).join(" ")));
+	for (let what of unexplained) {
+		notes.push(_apaTodo(what) + ".");
+		todo.push(what);
+	}
+	// A plot of data whose y axis has no title (the paired t test's plots): the note says what it shows. Not for plots
+	// whose y axis lists labels (heatmaps, matrices, forest plots) or bar charts turned on their side.
 	let firstPlot = info.facts && info.facts.plots && info.facts.plots[0];
-	if (firstPlot && !firstPlot.yHidden && (firstPlot.y === null || (typeof firstPlot.y === "string" && firstPlot.y.trim() === "")) && info.facts.panels === 1
+	let noYTitleNeeded = /heatmap|matrix|forest|pie|path|network|tree|dendrogram|traffic|Objectives|posteriorProbability/i.test(info.plotName || "")
+		|| allGeoms.some(function (g) { return /Tile|Raster|diamond/.test(g); })
+		|| (firstPlot && !firstPlot.x && (firstPlot.geoms || []).every(function (g) { return /Bar|Col|Text|Label|Blank|RangeFrame/.test(g); }));
+	if (firstPlot && !noYTitleNeeded && !firstPlot.yHidden && (firstPlot.y === null || (typeof firstPlot.y === "string" && firstPlot.y.trim() === "")) && info.facts.panels === 1
 		&& (firstPlot.geoms || []).some(function (g) { return !/Text|Label|Blank|RangeFrame/.test(g); })) {
 		notes.push(_apaTodo(i18n("say what the y axis shows")) + ".");
 		todo.push(i18n("say what the y axis shows"));
 	}
-	// Abbreviations in the figure (axis titles, legends, text in the plot) written out, as for tables (APA 7, 7.28)
-	let words = [raw];
-	for (let plot of ((info.facts && info.facts.plots) || []))
-		for (let key of ["x", "y", "colour", "fill", "shape", "linetype", "text"])
-			words = words.concat(plot[key] || []);
-	let figureText = words.filter(function (w) { return typeof w === "string"; }).map(function (w) {
-		// plotmath as R writes it: BF[10], BF["01"], italic(r) ~ "=" ~ ".578"
-		return w.replace(/BF\s*\[\s*"?10"?\s*\]/g, "BF₁₀").replace(/BF\s*\[\s*"?01"?\s*\]/g, "BF₀₁").replace(/[~"]/g, " ");
-	}).join(" | ");
-	let noteSoFar = _apaPlain(notes.join(" "));
-	let explained = [];
-	for (let abbreviation in apaAbbreviationMeanings) {
-		let pattern = new RegExp("(^|[^\\p{L}\\p{N}-])" + abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^\\p{L}\\p{N}-])", "u");
-		let meaning = apaAbbreviationMeanings[abbreviation];
-		if (pattern.test(figureText) && noteSoFar.indexOf(abbreviation + " =") === -1 && noteSoFar.toLowerCase().indexOf(meaning.toLowerCase()) === -1)
-			explained.push(abbreviation + " = " + meaning);
-	}
-	if (explained.length > 0) {
-		notes.push(_apaEscape(explained.join("; ")) + ".");
-		log.add(i18n("Abbreviations explained"), i18n("Abbreviations in the figure are written out in the note (APA 7, 7.28)."), [{ from: "", to: notes[notes.length - 1] }]);
-	}
-
 	let sample = info.dataSampleSize;
 	let count = function (n) { return n >= 1000 ? n.toLocaleString("en") : String(n); };
 	if (sample && sample.n !== undefined)
 		notes.push("<i>N</i> = " + count(sample.n) + ".");
 	else if (sample && sample.range)
 		notes.push("<i>N</i>s range from " + count(sample.range.min) + " to " + count(sample.range.max) + " because of missing values.");
+	// Abbreviations in the figure (axis titles, legends, text in the plot) written out, as for tables (APA 7, 7.28), last in the general note (7.14),
+	// in the order they first appear
+	let words = [_apaPlain(titleHtml)];
+	for (let plot of ((info.facts && info.facts.plots) || []))
+		for (let key of ["x", "y", "colour", "fill", "shape", "linetype", "text"])
+			words = words.concat(plot[key] || []);
+	words = words.concat(info.facts ? _apaAsList(info.facts.panelHeadings) : []);
+	let figureText = words.filter(function (w) { return typeof w === "string"; }).map(_apaFigureAbbreviationText).join(" | ");
+	let noteSoFar = _apaPlain(notes.join(" "));
+	let meanings = Object.assign({}, apaAbbreviationMeanings, apaFigureAbbreviationMeanings);
+	if (_apaFigureIsBayesian(info))
+		meanings["CI"] = i18n("credible interval");
+	if (/standardErrorOfMeasurement/.test(info.analysisName || ""))
+		meanings["SEM"] = i18n("standard error of measurement");
+	let explained = [];
+	for (let abbreviation in meanings) {
+		// subscripts (₊, ₋) belong to the abbreviation: BF₋₀ isn't a plain BF
+		let pattern = new RegExp("(^|[^\\p{L}\\p{N}₀-₎-])" + abbreviation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^\\p{L}\\p{N}₀-₎-])", "u");
+		let match = pattern.exec(figureText);
+		// already defined in the note ("CI = ...", "(CI)"): a meaning written out without its abbreviation doesn't count
+		let defined = noteSoFar.indexOf(abbreviation + " =") !== -1 || noteSoFar.indexOf("(" + abbreviation + ")") !== -1;
+		if (match && !defined)
+			explained.push({ at: match.index, text: abbreviation + " = " + meanings[abbreviation] });
+	}
+	explained.sort(function (a, b) { return a.at - b.at; });
+	if (explained.length > 0) {
+		notes.push(_apaEscape(explained.map(function (e) { return e.text; }).join("; ")) + ".");
+		log.add(i18n("Abbreviations explained"), i18n("Abbreviations in the figure are written out in the note, in the order they appear (APA 7, 7.28)."), [{ from: "", to: notes[notes.length - 1] }]);
+	}
 
 	// The picture: its own size in inches, so Word and Docs paste it with its text at 8 to 14 pt
 	let image = info.image || {};
@@ -2961,15 +3645,15 @@ function buildAPAFigure(info, figureNumber) {
 
 	let noteLabel = i18n("Note.");
 	let html = '<div style="' + apaTextStyle + ';">';
-	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><b>' + _apaEscape(i18n("Figure")) + " " + figureNumber + "</b></p>";
-	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';"><i>' + titleHtml + "</i></p>";
+	html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';"><b>' + _apaEscape(i18n("Figure")) + " " + figureNumber + "</b></p>";
+	html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';"><i>' + titleHtml + "</i></p>";
 	if (tooWide)
-		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide for a portrait page: put this figure on a landscape page")) + "</p>";
+		html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide for a portrait page: put this figure on a landscape page")) + "</p>";
 	if (tooWideForLandscape)
-		html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide even for a landscape page: make this figure smaller")) + "</p>";
+		html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';">' + _apaTodo(i18n("Too wide even for a landscape page: make this figure smaller")) + "</p>";
 	html += '<p style="margin: 0pt 0pt 6pt 0pt; ' + apaTextStyle + ';">' + img + "</p>";
 	if (notes.length > 0)
-		html += '<p style="margin: 6pt 0pt 0pt 0pt; ' + apaTextStyle + ';"><i>' + _apaEscape(noteLabel) + "</i> " + notes.join(" ") + "</p>";
+		html += '<p style="' + apaFrameParagraphStyle + '; ' + apaTextStyle + ';"><i>' + _apaEscape(noteLabel) + "</i> " + notes.join(" ") + "</p>";
 	html += "</div>";
 	html = html.replace(/ data-apa-todo="1"/g, "");
 

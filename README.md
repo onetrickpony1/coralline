@@ -36,7 +36,7 @@ Coralline is a formatting helper. It saves you the fiddly work of making JASP's 
 **What it does**
 
 - Takes the tables JASP has already made and lays them out in APA 7 style: the lines, the rounding, the italics, the "Table 1" above and the *Note.* below, with your sample size.
-- On Linux, with JASP installed from Flathub, does the same for your plots: each becomes a "Figure 1" with a title and a note.
+- On Linux, with JASP installed from Flathub, does the same for your plots: each is redrawn in APA style (clear colours, panel letters, no gridlines) and becomes a "Figure 1" with a title and a note.
 - Keeps your results as they are. The numbers are JASP's own, only rounded the APA way. Your JASP file is never changed.
 - Shows you every change it made, so you can check it.
 - Highlights the few things it can't know, like a good title for your table, and tells you what to write.
@@ -50,7 +50,7 @@ Coralline is a formatting helper. It saves you the fiddly work of making JASP's 
 - Graphs and plots only work on Linux so far (see **Which JASP version** above). Elsewhere it does tables only.
 - It only sees what you've saved in JASP. Save in JASP first, or your newest results won't be there.
 - It doesn't know your course's own rules. If your tutor or marking guide asks for something different from APA 7, do what they say.
-- It can't promise a perfect table every time. Look over every table before you hand your work in. It's still your work.
+- It can't promise a perfect table or figure every time. Look over every one before you hand your work in. It's still your work.
 
 If you aren't sure whether tools like this are allowed on your course, ask your tutor. Coralline is made by one person. It isn't made by the JASP team or by the APA.
 
