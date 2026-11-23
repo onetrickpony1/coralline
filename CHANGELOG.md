@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-23
+
 ### Features
 - **Panel letters.** A figure with several panels gets bold capital letters (A, B, C) at each panel's top left. On narrow panels the letter sits above the heading. Long headings wrap at their spaces, or after a hyphen they already have, and shrink to 7 pt before a word is ever split.
 - **Figure notes describe each panel**, the way the APA manual does: "Panel A: Strength. Panel B: Closeness." Headings keep the capitals JASP gave them. A heading that is only a symbol or a code, like "mu" or "Hu", gets a to-do in its place instead.
