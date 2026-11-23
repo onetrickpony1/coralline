@@ -54,9 +54,11 @@ Coralline is a formatting helper. It saves you the fiddly work of making JASP's 
 
 If you aren't sure whether tools like this are allowed on your course, ask your tutor. Coralline is made by one person. It isn't made by the JASP team or by the APA.
 
-![Coralline with a correlation example open](docs/screenshot.png)
+![Coralline in the light theme with a correlation example open, showing Table 1 as an APA correlation matrix with its note and a to-do to make the title describe the variables](docs/screenshot.png)
 
-![A box plot of liking redrawn as an APA figure, with its number, title and note](docs/screenshot-figures.png)
+![A line plot of mean rating of date for attractive, average and ugly looks, one line per charisma level (high, some, none) with open circles, filled circles and squares, redrawn as an APA figure with its number, title and note, in the light theme](docs/screenshot-figures.png)
+
+![Box plots inside violin shapes for groups 1 and 2 of the Sleep example, one green and one dark grey, redrawn as an APA figure with its number, title and note, in the dark theme](docs/screenshot-figures-dark.png)
 
 ## Features
 
@@ -81,6 +83,10 @@ In the app:
 - **Hide the table list** (or press <kbd>B</kbd>) to give the tables the whole window.
 - **Feedback and problems** at the bottom of the table list (and in the menu) opens a GitHub issue with the version and system filled in (needs a free GitHub account).
 - **Recent files** (also in the menu once a file is open), preview size, and keyboard shortcuts for everything (press <kbd>F1</kbd>). Single-key shortcuts can be turned off in the menu, for screen readers.
+
+The four themes, from the top: light, dark, pink and green. In the green theme the app marks the parts to finish in red, because yellow barely shows on green.
+
+![The top bar and first table of the Sleep example in the light, dark, pink and green themes, one above the other](docs/screenshot-themes.png)
 
 ## Use
 
