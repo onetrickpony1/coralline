@@ -1,5 +1,7 @@
 # Coralline
 
+<img src='ui/icon.svg' width='128' height='128' align='right' alt='Coralline icon'/>
+
 Coralline opens a saved [JASP](https://jasp-stats.org) file and turns every results table in it into an APA 7 table. Click **Copy APA table** and paste into Word or Google Docs. The tables are drawn by JASP's own code, so they show the same values JASP does. Your JASP file is only read, never changed.
 
 ## Install
